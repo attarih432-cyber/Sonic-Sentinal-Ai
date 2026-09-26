@@ -465,7 +465,7 @@ def register(payload: Registration, response: Response):
     try:
         result = db.users.insert_one(user)
     except DuplicateKeyError:
-        raise HTTPException(409, "An account with this email already exists")
+        raise HTTPException(409, "An account with this email already exists. Please sign in instead.")
     user["_id"] = result.inserted_id
     set_session(response, str(user["_id"]))
     return user_out(user)
@@ -474,9 +474,12 @@ def register(payload: Registration, response: Response):
 @app.post("/auth/login")
 def login(payload: Credentials, response: Response):
     db = get_db()
-    user = db.users.find_one({"email": str(payload.email).lower()})
-    if not user or not user.get("password_hash") or not password_matches(payload.password, user["password_hash"]):
-        raise HTTPException(401, "Invalid email or password")
+    email_clean = str(payload.email).strip().lower()
+    user = db.users.find_one({"email": email_clean})
+    if not user:
+        raise HTTPException(404, "No account found with this email. Please create an account first.")
+    if not user.get("password_hash") or not password_matches(payload.password, user["password_hash"]):
+        raise HTTPException(401, "Incorrect password. Please verify and try again.")
     set_session(response, str(user["_id"]))
     return user_out(user)
 

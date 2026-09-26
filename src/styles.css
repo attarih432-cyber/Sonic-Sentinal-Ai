@@ -1907,15 +1907,45 @@ main.rail-collapsed .app-shell {
 
 .auth-error-box {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: rgba(255, 51, 102, 0.15);
-  border: 1px solid rgba(255, 51, 102, 0.35);
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 51, 102, 0.12);
+  border: 1px solid rgba(255, 51, 102, 0.4);
   color: #ff99b3;
-  font-size: 12px;
+  font-size: 12.5px;
   margin-bottom: 14px;
+  line-height: 1.45;
+}
+.auth-error-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #ff3366;
+}
+.auth-error-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.auth-error-action-btn {
+  background: none;
+  border: none;
+  color: var(--cyan);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  transition: opacity 0.2s;
+  display: inline-block;
+  width: fit-content;
+}
+.auth-error-action-btn:hover {
+  opacity: 0.8;
+  color: #fff;
 }
 .auth-success-box {
   display: flex;

@@ -165,8 +165,28 @@ export function AuthCard({
 
         {error && (
           <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="auth-error-box">
-            <AlertTriangle size={15} />
-            <span>{error}</span>
+            <AlertTriangle size={16} className="auth-error-icon" />
+            <div className="auth-error-content">
+              <span>{error}</span>
+              {mode === 'login' && error.toLowerCase().includes('create an account') && (
+                <button
+                  type="button"
+                  className="auth-error-action-btn"
+                  onClick={() => { setMode('register'); setError(''); setSuccessMsg(''); }}
+                >
+                  Create Account Now →
+                </button>
+              )}
+              {mode === 'register' && error.toLowerCase().includes('already exists') && (
+                <button
+                  type="button"
+                  className="auth-error-action-btn"
+                  onClick={() => { setMode('login'); setError(''); setSuccessMsg(''); }}
+                >
+                  Sign In Instead →
+                </button>
+              )}
+            </div>
           </motion.div>
         )}
 
