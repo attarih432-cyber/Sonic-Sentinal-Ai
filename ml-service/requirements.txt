@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+email-validator
+
+# Imported by ml-service/app/main.py but previously missing from this list,
+# which made a clean `pip install -r requirements.txt` fail at import time.
+pymongo
+python-dotenv
+requests

@@ -1,0 +1,1 @@
+import {api} from './client'; export interface Review {id:string; detectionId:string; finalClassification?:string; notes?:string; status:string}; export const reviewsApi={list:()=>api.get<Review[]>('/reviews'),create:(review:Omit<Review,'id'>)=>api.post<Review>('/reviews',review)};

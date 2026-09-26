@@ -1,0 +1,1 @@
+import {api} from './client'; export interface Model {id:string; name:string; version:string; type:string; status:string; metrics?:Record<string,number>; datasetSize?:number}; export const modelsApi={list:()=>api.get<Model[]>('/models')};

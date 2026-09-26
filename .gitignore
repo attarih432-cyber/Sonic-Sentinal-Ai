@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.vite/
+out/
+*.tsbuildinfo
+
+# Environment / secrets -- NEVER commit these
+.env
+.env.*
+!.env.example
+!*.env.example
+ml-service/.env
+ml-service/.env.*
+!ml-service/.env.example
+*.pem
+*.key
+*.p12
+secrets.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local runtime data (kept on disk, never committed)
+ml-service/data/uploads/
+ml-service/models/python_model/*.pkl
+*.db
+*.db-*
+*.sqlite*
+ml-service/data/*.db*
+
+# Pre-rewrite stylesheet backup, kept locally for reference
+src/styles.legacy-*.css
+
+# Quarantine of the removed Next.js scaffold + node_modules repair debris
+# (moved to E:\SonicSentinel-quarantine-20260925, not deleted)
+Quarantine*/
+next.config.mjs
+run-server.bat
+node_modules.broken/
+node_modules.partial-*/
+node_modules.failed-*/
+_extract_*.cjs
+dl_deps.*
+install_fast.py
+*.tgz
+npm-cache/

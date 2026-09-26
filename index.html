@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>SonicSentinel — Acoustic Threat Intelligence</title>
+    <meta
+      name="description"
+      content="SonicSentinel turns raw audio into forensic-grade signal intelligence. Detect anomalies, classify threats and read an acoustic cityscape in real time."
+    />
+    <meta name="theme-color" content="#07090E" />
+    <meta name="color-scheme" content="dark" />
+    <meta property="og:title" content="SonicSentinel — Acoustic Threat Intelligence" />
+    <meta
+      property="og:description"
+      content="Detect anomalies, classify threats and read an acoustic cityscape in real time."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+    />
+    <style>
+      /* Paint the obsidian canvas before any CSS/JS arrives — kills the white flash. */
+      html {
+        background: #07090e;
+      }
+      #root {
+        min-height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

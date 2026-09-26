@@ -1,0 +1,1 @@
+import {api} from './client'; export interface Alert {id:string; detectionId:string; severity:string; message:string; read:boolean; resolved:boolean; createdAt:string}; export const alertsApi={list:()=>api.get<Alert[]>('/alerts'),update:(id:string,payload:Partial<Alert>)=>api.patch(`/alerts/${id}`,payload)};
