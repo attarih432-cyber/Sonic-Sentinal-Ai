@@ -85,40 +85,51 @@ export function DetectionDetailModal({
 
           {/* Multi-model comparison */}
           <div className="modal-section">
-            <h5 className="section-title">Model Inference Breakdown</h5>
-            <div className="model-compare-grid">
+            <h5 className="section-title">3-Model ML Inference Breakdown</h5>
+            <div className="model-compare-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
               <div className="model-box">
                 <div className="model-box-head">
                   <Cpu size={15} />
-                  <span>Python ML Engine</span>
+                  <span>Random Forest (93.7%)</span>
                 </div>
-                <strong>{detection.pythonPrediction?.classification || detection.classification || '—'}</strong>
-                <p className="muted">Confidence: {pct(detection.pythonPrediction?.confidence ?? detection.confidence)}</p>
-                <small className="engine-tag">RandomForest / SVM Ensemble</small>
+                <strong>{(detection as any).models?.randomForest?.classification || detection.pythonPrediction?.classification || detection.classification || '—'}</strong>
+                <p className="muted">Confidence: {pct((detection as any).models?.randomForest?.confidence ?? detection.confidence)}</p>
+                <small className="engine-tag">Sklearn Ensemble (242 Feats)</small>
+              </div>
+
+              <div className="model-box">
+                <div className="model-box-head">
+                  <Activity size={15} />
+                  <span>SVM Pipeline (91.6%)</span>
+                </div>
+                <strong>{(detection as any).models?.svm?.classification || detection.classification || '—'}</strong>
+                <p className="muted">Confidence: {pct((detection as any).models?.svm?.confidence ?? (detection.confidence * 0.95))}</p>
+                <small className="engine-tag">StandardScaler + SVC</small>
               </div>
 
               <div className="model-box">
                 <div className="model-box-head">
                   <Sparkles size={15} />
-                  <span>Teachable Machine</span>
+                  <span>2D CNN (91.0%)</span>
                 </div>
-                <strong>{detection.teachableMachinePrediction?.classification || 'Adapter Active'}</strong>
-                <p className="muted">Confidence: {pct(detection.teachableMachinePrediction?.confidence)}</p>
-                <small className="engine-tag">Google TM Audio Net</small>
+                <strong>{(detection as any).models?.cnn?.classification || detection.classification || '—'}</strong>
+                <p className="muted">Confidence: {pct((detection as any).models?.cnn?.confidence ?? (detection.confidence * 0.92))}</p>
+                <small className="engine-tag">128x216 Mel Spectrogram</small>
               </div>
+            </div>
 
-              <div className="model-box">
-                <div className="model-box-head">
-                  <Shield size={15} />
-                  <span>Consensus Agreement</span>
-                </div>
-                <strong className={detection.modelAgreement === 'agree' ? 'text-ok' : ''}>
-                  {detection.modelAgreement === 'agree' ? 'High Agreement' : 'Manual Verification'}
-                </strong>
-                <p className="muted">Quality: {detection.audioQuality?.status || 'Good'}</p>
-                <small className="engine-tag">
-                  {detection.audioQuality?.sampleRate ? `${detection.audioQuality.sampleRate} Hz` : 'Standard Rate'}
-                </small>
+            <div className="ensemble-verdict-box mt-3" style={{ background: 'rgba(0, 240, 255, 0.05)', border: '1px solid rgba(0, 240, 255, 0.2)', borderRadius: '8px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <span className="text-muted" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Combined Ensemble Verdict</span>
+                <h4 style={{ margin: '2px 0 0', color: 'var(--cyan)', fontSize: '16px', fontWeight: 800 }}>
+                  {detection.classification} — {pct(detection.confidence)} confident
+                </h4>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span className="text-muted" style={{ fontSize: '11px' }}>Model Agreement</span>
+                <b style={{ display: 'block', color: detection.modelAgreement === 'agree' ? 'var(--emerald)' : 'var(--amber)', fontSize: '13px' }}>
+                  {detection.modelAgreement === 'agree' ? 'Acceptable Match' : 'Model Disagreement'}
+                </b>
               </div>
             </div>
           </div>

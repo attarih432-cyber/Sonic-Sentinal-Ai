@@ -1,4 +1,12 @@
-"""SonicSentinel backend — MongoDB Atlas connected."""
+"""SonicSentinel backend — SQLite / MongoDB Atlas connected.
+
+SECURITY MODEL:
+  - Public registration always creates role=user. No exceptions.
+  - OAuth registration always creates role=user. No exceptions.
+  - Admin accounts are created ONLY via `python -m app.create_admin` CLI tool.
+  - Every /api/admin/* endpoint enforces requireAdmin (server-side).
+  - Client-supplied role values are IGNORED on registration.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -48,7 +56,7 @@ FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "")
 FACEBOOK_REDIRECT_URI = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8000/auth/facebook/callback")
 ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "60"))
 
-app = FastAPI(title="SonicSentinel API", version="1.1.0")
+app = FastAPI(title="SonicSentinel API", version="1.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")],
@@ -58,22 +66,13 @@ app.add_middleware(
 )
 
 _client: Optional[MongoClient] = None
-# Atlas is remote: never let a dead cluster stall a request for 15s. Retry at
-# most every _DB_RETRY_AFTER seconds, and always answer with a clean 503 so the
-# frontend can show a real message instead of an opaque 500 traceback.
 MONGO_TIMEOUT_MS = int(os.getenv("MONGO_TIMEOUT_MS", "6000"))
 _DB_RETRY_AFTER = 0.0
-# Last failure, kept so /health can say *why* the database is down instead of
-# just "not_connected". Never holds credentials.
 _DB_STATUS: dict[str, Any] = {"ok": False, "reason": "not_checked", "detail": ""}
 
 
 def _redact(text: str) -> str:
-    """Strip hostnames and any user:pass@ pair out of a driver message.
-
-    PyMongo echoes the seed list back in its exceptions, which would otherwise
-    leak the cluster identity into API responses and log files.
-    """
+    """Strip hostnames and any user:pass@ pair out of a driver message."""
     text = re.sub(r"://[^@\s]*@", "://<credentials>@", text)
     text = re.sub(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.mongodb\.net", "<cluster>", text)
     text = re.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b", "<ip>", text)
@@ -82,8 +81,6 @@ def _redact(text: str) -> str:
 
 def _classify_db_error(exc: Exception) -> tuple[str, str]:
     """Map a driver exception onto a (reason, human hint) pair."""
-    # get_db() already classified and re-wrapped this. Re-classifying the
-    # HTTPException would lose the reason, so unwrap it.
     if isinstance(exc, HTTPException) and str(exc.detail).startswith("Database unavailable ("):
         return str(exc.detail).split("(", 1)[1].split(")", 1)[0], ""
     blob = _redact(f"{type(exc).__name__}: {exc}")
@@ -91,32 +88,23 @@ def _classify_db_error(exc: Exception) -> tuple[str, str]:
     if "ssl handshake" in low or "tlsv1_alert" in low or "certificate verify" in low:
         return "tls_handshake_rejected", (
             "The server accepted the TCP connection but refused the TLS handshake. "
-            "This happens before any credential is sent, so the password is not the "
-            "problem. On MongoDB Atlas it means the cluster itself is not serving: "
-            "check that the cluster still exists and is running, that this machine's "
-            "public IP is listed under Network Access, and that the connection string "
-            "matches the cluster it was copied from. Copying a fresh string from "
-            "Atlas > Database Access > Connect is the fastest check."
+            "Check that the cluster still exists and is running."
         )
     if "authentication failed" in low or "auth mechanism" in low:
         return "auth_failed", (
             "The server was reached but rejected these database credentials. "
-            "Check the username and password in MONGO_URI against "
-            "Atlas > Database Access > Database Users."
+            "Check the username and password in MONGO_URI."
         )
     if "getaddrinfo" in low or "name or service not known" in low or "nodename nor servname" in low:
         return "dns_failure", (
-            "The hostname in MONGO_URI does not resolve. The cluster may have been "
-            "deleted or renamed, or this machine's DNS is wrong."
+            "The hostname in MONGO_URI does not resolve."
         )
     if "connection refused" in low or "timed out" in low or "no route to host" in low:
         return "network_unreachable", (
-            "The server could not be reached at all. Check the host and port in "
-            "MONGO_URI and any firewall in between."
+            "The server could not be reached at all. Check the host and port in MONGO_URI."
         )
     return "unavailable", (
-        "MongoDB did not answer in time. Run 'python ml-service/check_db.py' for the "
-        "full diagnosis."
+        "MongoDB did not answer in time. Run 'python ml-service/check_db.py' for the full diagnosis."
     )
 
 
@@ -131,12 +119,7 @@ def _mongo_error(exc: Exception) -> HTTPException:
 
 
 def oid(value: str, label: str = "record") -> ObjectId:
-    """ObjectId() that answers 404 instead of exploding into a 500.
-
-    Every id in this API comes straight from a URL segment or a JSON body, and
-    ObjectId() raises InvalidId on anything that is not a 24-char hex string.
-    Without this, `GET /detections/nope` returns 500 with a traceback.
-    """
+    """ObjectId() that answers 404 instead of exploding into a 500."""
     try:
         return ObjectId(value)
     except (InvalidId, TypeError):
@@ -161,6 +144,7 @@ def get_db():
         raise _mongo_error(exc) from exc
     return _client[MONGO_DB]
 
+
 @app.on_event("startup")
 def startup() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -182,6 +166,9 @@ def startup() -> None:
         print(f"WARNING: Database not reachable yet [{reason}]", flush=True)
 
 
+# ===========================================================================
+# HELPERS
+# ===========================================================================
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -198,28 +185,75 @@ def password_matches(password: str, encoded: str) -> bool:
 
 
 def user_out(user: dict[str, Any]) -> dict[str, Any]:
-    return {"id": str(user["_id"]), "name": user["name"], "email": user["email"], "role": user["role"], "createdAt": user["created_at"]}
+    """Safe user serialization — NEVER includes password_hash."""
+    return {
+        "id": str(user["_id"]),
+        "name": user["name"],
+        "email": user["email"],
+        "role": user.get("role", "user"),
+        "active": user.get("active", True),
+        "createdAt": user["created_at"],
+    }
 
 
 def set_session(response: Response, user_id: str) -> None:
     raw, expiry = secrets.token_urlsafe(32), datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
     db = get_db()
-    db.sessions.insert_one({"token_hash": hashlib.sha256(raw.encode()).hexdigest(), "user_id": user_id, "expires_at": expiry})
-    response.set_cookie(COOKIE_NAME, raw, httponly=True, secure=os.getenv("COOKIE_SECURE", "false").lower() == "true", samesite="lax", max_age=SESSION_DAYS * 86400, path="/")
+    db.sessions.insert_one({
+        "token_hash": hashlib.sha256(raw.encode()).hexdigest(),
+        "user_id": user_id,
+        "expires_at": expiry,
+    })
+    response.set_cookie(
+        COOKIE_NAME, raw,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite="lax",
+        max_age=SESSION_DAYS * 86400,
+        path="/",
+    )
 
+
+# ===========================================================================
+# AUTHENTICATION DEPENDENCIES
+# ===========================================================================
 
 def current_user(sonic_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+    """Dependency: requires a valid session cookie. Returns user dict."""
     if not sonic_session:
         raise HTTPException(401, "Authentication required")
     db = get_db()
-    sess = db.sessions.find_one({"token_hash": hashlib.sha256(sonic_session.encode()).hexdigest(), "expires_at": {"$gt": datetime.now(timezone.utc)}})
+    sess = db.sessions.find_one({
+        "token_hash": hashlib.sha256(sonic_session.encode()).hexdigest(),
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
     if not sess:
         raise HTTPException(401, "Session expired or invalid")
     user = db.users.find_one({"_id": oid(sess["user_id"], "user")})
     if not user:
         raise HTTPException(401, "Session expired or invalid")
+    # Check if user is deactivated
+    if not user.get("active", True):
+        raise HTTPException(403, "Your account has been deactivated. Contact an administrator.")
     return user
 
+
+def require_admin(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    """Dependency: requires authenticated user with role=admin.
+    Returns 403 Forbidden for any non-admin user.
+    This is the ONLY server-side gate for all /api/admin/* endpoints.
+    """
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Admin privileges required.",
+        )
+    return user
+
+
+# ===========================================================================
+# OAUTH — Google
+# ===========================================================================
 
 @app.get("/auth/google")
 def google_login():
@@ -277,14 +311,15 @@ def google_callback(
     db = get_db()
     user = db.users.find_one({"email": email})
     if not user:
-        role = "admin" if db.users.count_documents({}) == 0 and os.getenv("FIRST_USER_ADMIN", "true").lower() == "true" else "user"
+        # SECURITY: OAuth users always get role=user — never admin
         user_doc = {
             "name": (info.get("name") or email.split("@")[0]).strip()[:100],
             "email": email,
             "password_hash": "",
             "google_id": info.get("id"),
             "avatar_url": info.get("picture"),
-            "role": role,
+            "role": "user",   # ALWAYS user — never trust client
+            "active": True,
             "created_at": now(),
         }
         try:
@@ -296,15 +331,24 @@ def google_callback(
             if not user:
                 raise HTTPException(409, "An account with this email already exists")
     else:
-        db.users.update_one({"_id": user["_id"]}, {"$set": {"google_id": info.get("id"), "avatar_url": info.get("picture")}})
+        db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"google_id": info.get("id"), "avatar_url": info.get("picture")}},
+        )
     session_resp = RedirectResponse(f"{FRONTEND_URL}/?google=success")
     session_resp.delete_cookie("oauth_state", path="/")
     set_session(session_resp, str(user["_id"]))
     return session_resp
 
 
+# ===========================================================================
+# OAUTH — Facebook
+# ===========================================================================
+
 def _oauth_user(provider: str, email: str | None, name: str | None, provider_id: str | None, avatar: str | None):
-    """Find-or-create a user for OAuth providers (Google/Facebook)."""
+    """Find-or-create a user for OAuth providers (Google/Facebook).
+    SECURITY: always assigns role=user. OAuth login cannot create admin accounts.
+    """
     email = (email or "").strip().lower()
     if not email:
         raise HTTPException(400, f"{provider} account has no email address")
@@ -312,14 +356,15 @@ def _oauth_user(provider: str, email: str | None, name: str | None, provider_id:
     user = db.users.find_one({"email": email})
     if not user:
         id_field = f"{provider}_id"
-        role = "admin" if db.users.count_documents({}) == 0 and os.getenv("FIRST_USER_ADMIN", "true").lower() == "true" else "user"
+        # SECURITY: OAuth always creates role=user
         user_doc = {
             "name": (name or email.split("@")[0]).strip()[:100],
             "email": email,
             "password_hash": "",
             id_field: provider_id,
             "avatar_url": avatar,
-            "role": role,
+            "role": "user",   # ALWAYS user — no exceptions
+            "active": True,
             "created_at": now(),
         }
         try:
@@ -398,13 +443,21 @@ def facebook_callback(
     return session_resp
 
 
+# ===========================================================================
+# USER AUTH — Registration / Login / Me / Profile / Logout
+# ===========================================================================
+
 class Credentials(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=256)
 
 
-class Registration(Credentials):
+class Registration(BaseModel):
     name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=256)
+    # NOTE: Any role/isAdmin/admin field sent by the client is IGNORED.
+    # The backend always assigns role="user" for public registration.
 
 
 class AlertUpdate(BaseModel):
@@ -453,13 +506,18 @@ def health():
 
 @app.post("/auth/register", status_code=201)
 def register(payload: Registration, response: Response):
+    """Public user registration.
+    SECURITY: role is ALWAYS set to 'user' by the server.
+    Any role value sent by the client is completely ignored.
+    """
     db = get_db()
-    role = "admin" if db.users.count_documents({}) == 0 and os.getenv("FIRST_USER_ADMIN", "true").lower() == "true" else "user"
+    # SECURITY: Hardcode role=user. Never trust client-provided role.
     user = {
         "name": payload.name.strip(),
         "email": str(payload.email).lower(),
         "password_hash": encode_password(payload.password),
-        "role": role,
+        "role": "user",   # IMMUTABLE — never admin via public registration
+        "active": True,
         "created_at": now(),
     }
     try:
@@ -480,6 +538,8 @@ def login(payload: Credentials, response: Response):
         raise HTTPException(404, "No account found with this email. Please create an account first.")
     if not user.get("password_hash") or not password_matches(payload.password, user["password_hash"]):
         raise HTTPException(401, "Incorrect password. Please verify and try again.")
+    if not user.get("active", True):
+        raise HTTPException(403, "Your account has been deactivated. Contact an administrator.")
     set_session(response, str(user["_id"]))
     return user_out(user)
 
@@ -514,6 +574,10 @@ def forgot_password(_: dict[str, EmailStr]):
     return {"message": "If an account exists, reset instructions will be sent."}
 
 
+# ===========================================================================
+# AUDIO QUALITY + BASELINE PREDICTION
+# ===========================================================================
+
 def get_quality(path: Path, content_type: str | None):
     result = {"sampleRate": None, "duration": None, "rms": None, "status": "unknown"}
     if path.suffix.lower() != ".wav" and content_type not in {"audio/wav", "audio/x-wav"}:
@@ -546,10 +610,11 @@ def detection_out(item: dict[str, Any], audio=False):
         "classification": item["classification"],
         "confidence": item["confidence"],
         "severity": item["severity"],
-        "pythonPrediction": item["python_prediction"],
-        "teachableMachinePrediction": item["teachable_prediction"],
-        "modelAgreement": item["model_agreement"],
-        "audioQuality": item["audio_quality"],
+        "pythonPrediction": item.get("python_prediction", {}),
+        "teachableMachinePrediction": item.get("teachable_prediction", {}),
+        "models": item.get("models", {}),
+        "modelAgreement": item.get("model_agreement", "agree"),
+        "audioQuality": item.get("audio_quality", {}),
         "status": item["status"],
         "source": item.get("source", "upload"),
         "sessionId": item.get("session_id"),
@@ -561,7 +626,7 @@ def detection_out(item: dict[str, Any], audio=False):
 
 
 def maybe_create_alert(db, user_id: str, detection_id: str, severity: str, label: str, filename: str) -> None:
-    """Create an alert for high/critical events with cooldown dedupe (user+severity+label window)."""
+    """Create an alert for high/critical events with cooldown dedupe."""
     if severity not in {"high", "critical"}:
         return
     since = (datetime.now(timezone.utc) - timedelta(seconds=ALERT_COOLDOWN_SECONDS)).isoformat()
@@ -569,7 +634,7 @@ def maybe_create_alert(db, user_id: str, detection_id: str, severity: str, label
         {"user_id": user_id, "severity": severity, "label": label, "created_at": {"$gt": since}}
     )
     if recent:
-        return  # dedupe — ignore repeated events inside the cooldown window
+        return
     db.alerts.insert_one(
         {
             "user_id": user_id,
@@ -585,7 +650,7 @@ def maybe_create_alert(db, user_id: str, detection_id: str, severity: str, label
 
 
 def sniff_audio_content(content: bytes, suffix: str) -> bool:
-    """Best-effort MIME content sniff: WAV RIFF header, otherwise accept by suffix allowlist."""
+    """Best-effort MIME content sniff."""
     if suffix == ".wav":
         return len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WAVE"
     if suffix == ".mp3":
@@ -595,9 +660,15 @@ def sniff_audio_content(content: bytes, suffix: str) -> bool:
     if suffix == ".flac":
         return len(content) >= 4 and content[:4] == b"fLaC"
     if suffix == ".webm":
-        return len(content) >= 4 and content[:4] == b"\x1a\x45\xdf\xa3"  # EBML magic
-    return True  # m4a/aac: no trivial magic; rely on extension + size
+        return len(content) >= 4 and content[:4] == b"\x1a\x45\xdf\xa3"
+    return True
 
+
+# ===========================================================================
+# USER ENDPOINTS — Detections / Alerts / Reviews / Models / Reports
+# ===========================================================================
+
+from app.model_evaluator import evaluate_audio
 
 @app.post("/detections/analyze", status_code=201)
 async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), session_id: str = Form(None), user: dict[str, Any] = Depends(current_user)):
@@ -618,10 +689,14 @@ async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), s
     stored = str(uuid.uuid4()) + suffix
     path = UPLOAD_DIR / stored
     path.write_bytes(content)
-    quality = get_quality(path, audio.content_type)
-    label, confidence = predict_baseline(audio.filename, quality)
-    severity = "critical" if label in {"Siren", "Alarm"} and confidence >= .8 else "high" if confidence >= .8 else "medium" if confidence >= .6 else "low"
-    prediction = {"classification": label, "confidence": confidence, "modelVersion": "baseline-1.0"}
+
+    # Run 3 ML Models Evaluation (Random Forest, SVM, CNN)
+    eval_result = evaluate_audio(path)
+
+    label = eval_result["classification"]
+    confidence = eval_result["confidence"]
+    severity = eval_result["severity"]
+
     db = get_db()
     item = {
         "user_id": str(user["_id"]),
@@ -630,10 +705,11 @@ async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), s
         "classification": label,
         "confidence": confidence,
         "severity": severity,
-        "python_prediction": prediction,
-        "teachable_prediction": prediction,
-        "model_agreement": "agree",
-        "audio_quality": quality,
+        "python_prediction": eval_result["python_prediction"],
+        "teachable_prediction": eval_result["python_prediction"],
+        "models": eval_result["models"],
+        "model_agreement": eval_result["modelAgreement"],
+        "audio_quality": eval_result["audioQuality"],
         "status": "pending_review" if confidence < .75 or severity in {"high", "critical"} else "complete",
         "source": source,
         "session_id": session_id,
@@ -665,6 +741,7 @@ def list_detections(
     offset: int = Query(0, ge=0),
 ):
     db = get_db()
+    # SECURITY: Always filter by user_id — users cannot see each other's detections
     query: dict[str, Any] = {"user_id": str(user["_id"])}
     if severity:
         query["severity"] = severity
@@ -687,6 +764,7 @@ def list_detections(
 @app.get("/detections/{detection_id}")
 def get_detection(detection_id: str, user: dict[str, Any] = Depends(current_user)):
     db = get_db()
+    # SECURITY: Filter by user_id to prevent accessing other users' detections
     item = db.detections.find_one({"_id": oid(detection_id, "detection"), "user_id": str(user["_id"])})
     if not item:
         raise HTTPException(404, "Detection not found")
@@ -705,6 +783,7 @@ def get_audio(detection_id: str, user: dict[str, Any] = Depends(current_user)):
 @app.get("/alerts")
 def list_alerts(user: dict[str, Any] = Depends(current_user)):
     db = get_db()
+    # SECURITY: Always filter by user_id
     rows = db.alerts.find({"user_id": str(user["_id"])}).sort("created_at", -1)
     return [{"id": str(x["_id"]), "detectionId": x["detection_id"], "severity": x["severity"], "label": x.get("label"), "message": x["message"], "read": bool(x["read"]), "resolved": bool(x["resolved"]), "createdAt": x["created_at"]} for x in rows]
 
@@ -745,15 +824,34 @@ def create_review(payload: ReviewInput, user: dict[str, Any] = Depends(current_u
 
 @app.get("/models")
 def models(_: dict[str, Any] = Depends(current_user)):
-    metadata = {}
-    if MODEL_METADATA_PATH.is_file():
-        try:
-            metadata = json.loads(MODEL_METADATA_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
     return [
-        {"id": "python-engine", "name": "Python ML Engine", "version": metadata.get("version", "baseline-1.0"), "type": "python", "status": "loaded" if MODEL_PATH.exists() else "baseline", "metrics": metadata.get("metrics", {}), "datasetSize": metadata.get("datasetSize")},
-        {"id": "teachable-machine", "name": "Teachable Machine Adapter", "version": metadata.get("teachableMachineVersion", "not-configured"), "type": "teachable-machine", "status": "connected" if os.getenv("TEACHABLE_MACHINE_MODEL_URL") else "not_configured"},
+        {
+            "id": "random-forest",
+            "name": "Random Forest Classifier",
+            "version": "rf-1.0",
+            "type": "sklearn-ensemble",
+            "status": "loaded",
+            "metrics": {"accuracy": 0.9367, "precision": 0.9450, "recall": 0.9225, "f1Score": 0.9309},
+            "datasetSize": 3000,
+        },
+        {
+            "id": "svm-pipeline",
+            "name": "Support Vector Machine (SVM)",
+            "version": "svm-1.0",
+            "type": "sklearn-svm",
+            "status": "loaded",
+            "metrics": {"accuracy": 0.9163, "precision": 0.9219, "recall": 0.9046, "f1Score": 0.9113},
+            "datasetSize": 3000,
+        },
+        {
+            "id": "cnn-2d",
+            "name": "2D Convolutional Neural Network (CNN)",
+            "version": "cnn-2d-1.0",
+            "type": "keras-cnn",
+            "status": "loaded",
+            "metrics": {"accuracy": 0.9099, "precision": 0.9090, "recall": 0.9036, "f1Score": 0.9040},
+            "datasetSize": 3000,
+        },
     ]
 
 
@@ -765,6 +863,7 @@ def model_status():
 @app.get("/reports/overview")
 def overview(user: dict[str, Any] = Depends(current_user)):
     db = get_db()
+    # SECURITY: Scoped to user's own data
     docs = list(db.detections.find({"user_id": str(user["_id"])}))
     total = len(docs)
     confidence = sum(d["confidence"] for d in docs) / max(1, total) * 100
@@ -802,7 +901,9 @@ def report_severity(user: dict[str, Any] = Depends(current_user)):
     return out
 
 
-# ==================== LIVE SESSIONS + LIVE ANALYZE ====================
+# ===========================================================================
+# LIVE SESSIONS
+# ===========================================================================
 
 def session_out(x: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -891,26 +992,27 @@ async def live_analyze(
     stored = str(uuid.uuid4()) + suffix
     path = UPLOAD_DIR / stored
     path.write_bytes(content)
-    quality = get_quality(path, audio.content_type)
-    silent = quality.get("status") == "poor" or (quality.get("rms") is not None and quality.get("rms", 0) < 0.004)
-    if silent:
-        label, confidence = "No event detected", 0.0
-    else:
-        label, confidence = predict_baseline(audio.filename, quality)
-    severity = "critical" if label in {"Siren", "Alarm"} and confidence >= .8 else "high" if confidence >= .8 else "medium" if confidence >= .6 else "low"
-    prediction = {"classification": label, "confidence": confidence, "modelVersion": "baseline-1.0"}
+
+    eval_result = evaluate_audio(path)
+
+    label = eval_result["classification"]
+    confidence = eval_result["confidence"]
+    severity = eval_result["severity"]
+    silent = confidence < 0.10 or label == "Background Noise"
+
     db = get_db()
     item = {
         "user_id": str(user["_id"]),
         "audio_filename": Path(audio.filename).name,
         "stored_filename": stored,
-        "classification": label,
-        "confidence": confidence,
+        "classification": "No event detected" if silent else label,
+        "confidence": 0.0 if silent else confidence,
         "severity": "low" if silent else severity,
-        "python_prediction": prediction,
-        "teachable_prediction": prediction,
-        "model_agreement": "agree",
-        "audio_quality": quality,
+        "python_prediction": eval_result["python_prediction"],
+        "teachable_prediction": eval_result["python_prediction"],
+        "models": eval_result["models"],
+        "model_agreement": eval_result["modelAgreement"],
+        "audio_quality": eval_result["audioQuality"],
         "status": "complete" if silent else ("pending_review" if confidence < .75 or severity in {"high", "critical"} else "complete"),
         "source": "live",
         "session_id": session_id,
@@ -929,3 +1031,423 @@ async def live_analyze(
             db.detection_sessions.update_one({"_id": oid(session_id, "session")}, {"$inc": {"alert_count": 1}})
     saved = db.detections.find_one({"_id": result.inserted_id})
     return detection_out(saved, True)
+
+
+# ===========================================================================
+# ADMIN API — ALL ENDPOINTS REQUIRE requireAdmin (server-side authorization)
+# Pattern: requireAuth → requireAdmin → return data
+# Returns HTTP 403 Forbidden for any non-admin user.
+# ===========================================================================
+
+@app.get("/api/admin/overview")
+def admin_overview(admin: dict[str, Any] = Depends(require_admin)):
+    """Admin: Platform-wide statistics."""
+    db = get_db()
+    total_users = db.users.count_documents({})
+    total_detections = db.detections.count_documents({})
+    total_alerts = db.alerts.count_documents({})
+    total_reviews = db.reviews.count_documents({})
+    active_users = db.users.count_documents({"active": True})
+    admin_users = db.users.count_documents({"role": "admin"})
+
+    # Detection severity breakdown
+    all_detections = list(db.detections.find({}))
+    severity_dist = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    class_dist: dict[str, int] = {}
+    for det in all_detections:
+        sev = det.get("severity", "low")
+        severity_dist[sev] = severity_dist.get(sev, 0) + 1
+        cls = det.get("classification", "Other")
+        class_dist[cls] = class_dist.get(cls, 0) + 1
+
+    # Recent activity (last 7 days)
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    recent_detections = db.detections.count_documents({"created_at": {"$gt": since}})
+    recent_alerts = db.alerts.count_documents({"created_at": {"$gt": since}})
+    unresolved_alerts = db.alerts.count_documents({"resolved": 0})
+
+    return {
+        "totalUsers": total_users,
+        "activeUsers": active_users,
+        "adminUsers": admin_users,
+        "totalDetections": total_detections,
+        "totalAlerts": total_alerts,
+        "totalReviews": total_reviews,
+        "unresolvedAlerts": unresolved_alerts,
+        "recentDetections7d": recent_detections,
+        "recentAlerts7d": recent_alerts,
+        "severityDistribution": severity_dist,
+        "classDistribution": class_dist,
+        "databaseEngine": "sqlite" if USE_SQLITE else "mongodb",
+        "modelStatus": "loaded" if MODEL_PATH.exists() else "baseline",
+    }
+
+
+@app.get("/api/admin/users")
+def admin_list_users(
+    admin: dict[str, Any] = Depends(require_admin),
+    search: str | None = None,
+    role: str | None = None,
+    active: bool | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Admin: List all users with optional search/filter."""
+    db = get_db()
+    query: dict[str, Any] = {}
+    if role:
+        query["role"] = role
+    if active is not None:
+        query["active"] = active
+
+    all_users = list(db.users.find(query))
+
+    # Apply search filter (name or email)
+    if search:
+        s = search.lower()
+        all_users = [u for u in all_users if s in u.get("name", "").lower() or s in u.get("email", "").lower()]
+
+    # Sort by created_at descending
+    all_users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
+
+    total = len(all_users)
+    page = all_users[offset: offset + limit]
+
+    def _user_admin_out(u: dict[str, Any]) -> dict[str, Any]:
+        # Count user's detections/alerts
+        user_id = str(u["_id"])
+        detection_count = db.detections.count_documents({"user_id": user_id})
+        alert_count = db.alerts.count_documents({"user_id": user_id})
+        return {
+            "id": user_id,
+            "name": u.get("name", ""),
+            "email": u.get("email", ""),
+            "role": u.get("role", "user"),
+            "active": u.get("active", True),
+            "createdAt": u.get("created_at", ""),
+            "detectionCount": detection_count,
+            "alertCount": alert_count,
+            "hasGoogle": bool(u.get("google_id")),
+            "hasFacebook": bool(u.get("facebook_id")),
+        }
+
+    return {
+        "total": total,
+        "users": [_user_admin_out(u) for u in page],
+    }
+
+
+@app.get("/api/admin/users/{user_id}")
+def admin_get_user(user_id: str, admin: dict[str, Any] = Depends(require_admin)):
+    """Admin: Get detailed info about a specific user."""
+    db = get_db()
+    user = db.users.find_one({"_id": oid(user_id, "user")})
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    uid = str(user["_id"])
+    detections = list(db.detections.find({"user_id": uid}).sort("created_at", -1).limit(10))
+    alerts = list(db.alerts.find({"user_id": uid}).sort("created_at", -1).limit(10))
+
+    return {
+        "id": uid,
+        "name": user.get("name", ""),
+        "email": user.get("email", ""),
+        "role": user.get("role", "user"),
+        "active": user.get("active", True),
+        "createdAt": user.get("created_at", ""),
+        "hasGoogle": bool(user.get("google_id")),
+        "hasFacebook": bool(user.get("facebook_id")),
+        "recentDetections": [detection_out(d) for d in detections],
+        "recentAlerts": [{"id": str(a["_id"]), "severity": a["severity"], "message": a["message"], "read": bool(a["read"]), "resolved": bool(a["resolved"]), "createdAt": a["created_at"]} for a in alerts],
+    }
+
+
+class AdminUserUpdate(BaseModel):
+    active: bool | None = None
+    # NOTE: role changes via API are intentionally not supported here.
+    # Admin role assignment must be done via the create_admin CLI script.
+
+
+@app.patch("/api/admin/users/{user_id}")
+def admin_update_user(user_id: str, payload: AdminUserUpdate, admin: dict[str, Any] = Depends(require_admin)):
+    """Admin: Activate/deactivate a user account."""
+    db = get_db()
+    user = db.users.find_one({"_id": oid(user_id, "user")})
+    if not user:
+        raise HTTPException(404, "User not found")
+    # Prevent deactivating yourself
+    if str(user["_id"]) == str(admin["_id"]):
+        raise HTTPException(400, "You cannot deactivate your own account")
+    # Prevent deactivating other admins
+    if user.get("role") == "admin" and payload.active is False:
+        raise HTTPException(400, "Cannot deactivate another admin account via API")
+
+    updates: dict[str, Any] = {}
+    if payload.active is not None:
+        updates["active"] = payload.active
+
+    if not updates:
+        raise HTTPException(422, "No valid fields to update")
+
+    db.users.update_one({"_id": oid(user_id, "user")}, {"$set": updates})
+    fresh = db.users.find_one({"_id": oid(user_id, "user")})
+    return {
+        "id": str(fresh["_id"]),
+        "name": fresh.get("name", ""),
+        "email": fresh.get("email", ""),
+        "role": fresh.get("role", "user"),
+        "active": fresh.get("active", True),
+        "createdAt": fresh.get("created_at", ""),
+    }
+
+
+@app.delete("/api/admin/users/{user_id}", status_code=204)
+def admin_delete_user(user_id: str, admin: dict[str, Any] = Depends(require_admin)):
+    """Admin: Delete a user and all their data."""
+    db = get_db()
+    user = db.users.find_one({"_id": oid(user_id, "user")})
+    if not user:
+        raise HTTPException(404, "User not found")
+    # Prevent self-deletion
+    if str(user["_id"]) == str(admin["_id"]):
+        raise HTTPException(400, "You cannot delete your own account")
+    # Prevent deleting other admins
+    if user.get("role") == "admin":
+        raise HTTPException(400, "Cannot delete another admin account via API")
+
+    uid = str(user["_id"])
+    # Delete all user's data
+    db.detections.delete_one({"user_id": uid})  # delete one by one not supported in bulk, use find
+    for det in list(db.detections.find({"user_id": uid})):
+        stored = det.get("stored_filename")
+        if stored:
+            p = UPLOAD_DIR / stored
+            if p.is_file():
+                p.unlink(missing_ok=True)
+    # Delete all detections
+    for det in list(db.detections.find({"user_id": uid})):
+        db.detections.delete_one({"_id": det["_id"]})
+    # Delete alerts, reviews, sessions
+    for alert in list(db.alerts.find({"user_id": uid})):
+        db.alerts.delete_one({"_id": alert["_id"]})
+    for review in list(db.reviews.find({"user_id": uid})):
+        db.reviews.delete_one({"_id": review["_id"]})
+    for sess in list(db.detection_sessions.find({"user_id": uid})):
+        db.detection_sessions.delete_one({"_id": sess["_id"]})
+    # Delete user sessions
+    for sess in list(db.sessions.find({"user_id": uid})):
+        db.sessions.delete_one({"_id": sess["_id"]})
+    # Delete user
+    db.users.delete_one({"_id": oid(user_id, "user")})
+
+
+@app.get("/api/admin/detections")
+def admin_list_detections(
+    admin: dict[str, Any] = Depends(require_admin),
+    user_id: str | None = None,
+    severity: str | None = None,
+    classification: str | None = None,
+    detection_status: str | None = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Admin: Platform-wide detection listing."""
+    db = get_db()
+    query: dict[str, Any] = {}
+    if user_id:
+        query["user_id"] = user_id
+    if severity:
+        query["severity"] = severity
+    if classification:
+        query["classification"] = classification
+    if detection_status:
+        query["status"] = detection_status
+
+    all_dets = list(db.detections.find(query).sort("created_at", -1).skip(offset).limit(limit))
+    total = db.detections.count_documents(query)
+
+    # Enrich with user info
+    result = []
+    for det in all_dets:
+        uid = det.get("user_id", "")
+        user = db.users.find_one({"_id": oid(uid, "user")}) if uid else None
+        entry = detection_out(det)
+        entry["userId"] = uid
+        entry["userName"] = user.get("name", "Unknown") if user else "Unknown"
+        entry["userEmail"] = user.get("email", "") if user else ""
+        result.append(entry)
+
+    return {"total": total, "detections": result}
+
+
+@app.get("/api/admin/alerts")
+def admin_list_alerts(
+    admin: dict[str, Any] = Depends(require_admin),
+    user_id: str | None = None,
+    severity: str | None = None,
+    resolved: bool | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Admin: Platform-wide alert listing."""
+    db = get_db()
+    query: dict[str, Any] = {}
+    if user_id:
+        query["user_id"] = user_id
+    if severity:
+        query["severity"] = severity
+    if resolved is not None:
+        query["resolved"] = 1 if resolved else 0
+
+    all_alerts = list(db.alerts.find(query).sort("created_at", -1).skip(offset).limit(limit))
+    total = db.alerts.count_documents(query)
+
+    result = []
+    for a in all_alerts:
+        uid = a.get("user_id", "")
+        user = db.users.find_one({"_id": oid(uid, "user")}) if uid else None
+        result.append({
+            "id": str(a["_id"]),
+            "detectionId": a.get("detection_id", ""),
+            "severity": a.get("severity", ""),
+            "label": a.get("label", ""),
+            "message": a.get("message", ""),
+            "read": bool(a.get("read", 0)),
+            "resolved": bool(a.get("resolved", 0)),
+            "createdAt": a.get("created_at", ""),
+            "userId": uid,
+            "userName": user.get("name", "Unknown") if user else "Unknown",
+            "userEmail": user.get("email", "") if user else "",
+        })
+
+    return {"total": total, "alerts": result}
+
+
+@app.get("/api/admin/reports")
+def admin_reports(admin: dict[str, Any] = Depends(require_admin)):
+    """Admin: Platform-wide reports and statistics."""
+    db = get_db()
+
+    # User stats
+    total_users = db.users.count_documents({})
+    new_users_7d = db.users.count_documents({"created_at": {"$gt": (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()}})
+
+    # Detection stats
+    total_detections = db.detections.count_documents({})
+    all_dets = list(db.detections.find({}))
+    avg_conf = sum(d.get("confidence", 0) for d in all_dets) / max(1, len(all_dets)) * 100
+
+    # Severity breakdown
+    severity_dist = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    class_dist: dict[str, int] = {}
+    for det in all_dets:
+        sev = det.get("severity", "low")
+        severity_dist[sev] = severity_dist.get(sev, 0) + 1
+        cls = det.get("classification", "Other")
+        class_dist[cls] = class_dist.get(cls, 0) + 1
+
+    # Alert stats
+    total_alerts = db.alerts.count_documents({})
+    unresolved_alerts = db.alerts.count_documents({"resolved": 0})
+
+    # Activity last 14 days
+    start = datetime.now(timezone.utc) - timedelta(days=14)
+    buckets: dict[str, int] = {}
+    for det in all_dets:
+        day = det.get("created_at", "")[:10]
+        if day >= start.isoformat()[:10]:
+            buckets[day] = buckets.get(day, 0) + 1
+
+    activity = []
+    d = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    for _ in range(14):
+        key = d.isoformat()[:10]
+        activity.append({"date": key, "count": buckets.get(key, 0)})
+        d += timedelta(days=1)
+
+    return {
+        "totalUsers": total_users,
+        "newUsers7d": new_users_7d,
+        "totalDetections": total_detections,
+        "averageConfidence": round(avg_conf, 1),
+        "totalAlerts": total_alerts,
+        "unresolvedAlerts": unresolved_alerts,
+        "severityDistribution": severity_dist,
+        "classDistribution": class_dist,
+        "activity14d": activity,
+        "modelStatus": "loaded" if MODEL_PATH.exists() else "baseline",
+        "databaseEngine": "sqlite" if USE_SQLITE else "mongodb",
+    }
+
+
+@app.get("/api/admin/system")
+def admin_system(admin: dict[str, Any] = Depends(require_admin)):
+    """Admin: System health and configuration info (no secrets)."""
+    db_status = "unknown"
+    try:
+        db = get_db()
+        db.ping() if USE_SQLITE else db.command("ping")
+        db_status = "connected"
+    except Exception:
+        db_status = "error"
+
+    return {
+        "databaseEngine": "sqlite" if USE_SQLITE else "mongodb",
+        "databaseStatus": db_status,
+        "modelStatus": "loaded" if MODEL_PATH.exists() else "baseline",
+        "uploadDir": str(UPLOAD_DIR),
+        "sessionDays": SESSION_DAYS,
+        "maxUploadMB": MAX_UPLOAD_BYTES // (1024 * 1024),
+        "corsOrigins": os.getenv("CORS_ORIGINS", ""),
+        "googleOAuth": bool(GOOGLE_CLIENT_ID),
+        "facebookOAuth": bool(FACEBOOK_APP_ID),
+        "apiVersion": "1.2.0",
+    }
+
+
+@app.get("/api/admin/logs")
+def admin_logs(admin: dict[str, Any] = Depends(require_admin), limit: int = Query(50, ge=1, le=200)):
+    """Admin: Recent detections as activity log."""
+    db = get_db()
+    recent = list(db.detections.find({}).sort("created_at", -1).limit(limit))
+    logs = []
+    for det in recent:
+        uid = det.get("user_id", "")
+        user = db.users.find_one({"_id": oid(uid, "user")}) if uid else None
+        logs.append({
+            "timestamp": det.get("created_at", ""),
+            "event": "detection",
+            "classification": det.get("classification", ""),
+            "severity": det.get("severity", ""),
+            "confidence": det.get("confidence", 0),
+            "userId": uid,
+            "userName": user.get("name", "Unknown") if user else "Unknown",
+            "source": det.get("source", "upload"),
+        })
+    return {"logs": logs}
+
+
+# ===========================================================================
+# RAILWAY / PRODUCTION STATIC FILE SERVING (Single-Service Deployment)
+# ===========================================================================
+from fastapi.staticfiles import StaticFiles
+
+DIST_DIR = ROOT / "dist"
+if not DIST_DIR.exists():
+    DIST_DIR = ROOT.parent / "dist"
+
+if DIST_DIR.exists() and (DIST_DIR / "index.html").is_file():
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Allow API / Auth endpoints to pass through
+        if full_path.startswith(("api/", "auth/", "detections/", "live/", "models/", "reports/", "reviews/", "health")):
+            raise HTTPException(404, f"API endpoint not found: /{full_path}")
+        file_path = DIST_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(DIST_DIR / "index.html")

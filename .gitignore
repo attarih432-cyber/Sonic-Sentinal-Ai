@@ -44,6 +44,8 @@ Thumbs.db
 
 # Local runtime data (kept on disk, never committed)
 ml-service/data/uploads/
+ml-service/data/temp/
+ml-service/scratch_temp/
 ml-service/models/python_model/*.pkl
 *.db
 *.db-*

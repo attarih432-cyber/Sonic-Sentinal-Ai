@@ -797,26 +797,24 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
 
           <div className="result-inference-grid">
             <div className="inf-tile">
-              <span className="inf-label">Python ML Engine</span>
-              <strong>{result.pythonPrediction?.classification || result.classification}</strong>
-              <small>{pct(result.pythonPrediction?.confidence ?? result.confidence)}</small>
+              <span className="inf-label">Random Forest (93.7%)</span>
+              <strong>{result.models?.randomForest?.classification || result.classification}</strong>
+              <small>{pct(result.models?.randomForest?.confidence ?? result.confidence)} confidence</small>
             </div>
             <div className="inf-tile">
-              <span className="inf-label">Teachable Machine</span>
-              <strong>{result.teachableMachinePrediction?.classification || 'Adapter Active'}</strong>
-              <small>{pct(result.teachableMachinePrediction?.confidence)}</small>
+              <span className="inf-label">SVM Pipeline (91.6%)</span>
+              <strong>{result.models?.svm?.classification || result.classification}</strong>
+              <small>{pct(result.models?.svm?.confidence ?? result.confidence)} confidence</small>
             </div>
             <div className="inf-tile">
-              <span className="inf-label">Model Agreement</span>
-              <strong className={result.modelAgreement === 'agree' ? 'text-emerald' : ''}>
-                {result.modelAgreement === 'agree' ? 'Consensus Verified' : 'Divergence Flagged'}
-              </strong>
-              <small>Dual Classifier</small>
+              <span className="inf-label">2D CNN (91.0%)</span>
+              <strong>{result.models?.cnn?.classification || result.classification}</strong>
+              <small>{pct(result.models?.cnn?.confidence ?? result.confidence)} confidence</small>
             </div>
-            <div className="inf-tile">
-              <span className="inf-label">Audio Quality</span>
-              <strong>{result.audioQuality?.status || 'Good'}</strong>
-              <small>{result.audioQuality?.sampleRate ? `${result.audioQuality.sampleRate} Hz` : 'Standard'}</small>
+            <div className="inf-tile highlighted" style={{ border: '1px solid rgba(0,240,255,0.3)', background: 'rgba(0,240,255,0.08)' }}>
+              <span className="inf-label" style={{ color: 'var(--cyan)' }}>Final Ensemble Verdict</span>
+              <strong style={{ color: 'var(--cyan)', fontSize: '15px' }}>{result.classification}</strong>
+              <small style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{pct(result.confidence)} Combined Score</small>
             </div>
           </div>
         </motion.section>

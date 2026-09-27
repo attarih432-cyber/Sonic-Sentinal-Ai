@@ -1,10 +1,23 @@
+/**
+ * SonicSentinel — Root Application Entry
+ *
+ * ROLE-BASED ROUTING:
+ *   - user  → User Dashboard (upload audio, detections, alerts, etc.)
+ *   - admin → Admin Dashboard (platform management)
+ *
+ * SECURITY:
+ *   - Role is read from /auth/me (server-authoritative, never from localStorage).
+ *   - Admin dashboard is only rendered when user.role === 'admin'.
+ *   - Normal users receive the user dashboard regardless of any URL manipulation.
+ *   - All admin API calls are additionally protected server-side (HTTP 403 if non-admin).
+ */
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { AnimatePresence, motion } from 'framer-motion';
-import { 
-  Bell, ChevronDown, Loader2, LogOut, MoreHorizontal, 
-  Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, 
+import {
+  Bell, ChevronDown, Loader2, LogOut, MoreHorizontal,
+  Moon, PanelLeftClose, PanelLeftOpen, Search, Sun,
   CheckCircle2, AlertTriangle, Info, X, Shield, Activity,
   Sliders, User as UserIcon
 } from 'lucide-react';
@@ -15,6 +28,7 @@ import { LandingPage } from './landing';
 import { AuthCard } from './auth/AuthCard';
 import { Overview, Analyze, SettingsPage, Generic, nav, type Page } from './pages';
 import { LiveMonitorPage } from './live';
+import { AdminDashboard } from './admin/AdminDashboard';
 import { api } from './api/client';
 
 /* ---- Toast Notification Host ---- */
@@ -36,11 +50,11 @@ function ToastHost() {
     <div className="toast-host">
       <AnimatePresence>
         {toasts.map(t => (
-          <motion.div 
-            key={t.id} 
-            initial={{ opacity: 0, x: 60, scale: 0.95 }} 
-            animate={{ opacity: 1, x: 0, scale: 1 }} 
-            exit={{ opacity: 0, x: 40, scale: 0.95 }} 
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0, x: 60, scale: 0.95 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 40, scale: 0.95 }}
             className={`toast toast-${t.type}`}
           >
             {t.type === 'success' ? (
@@ -61,8 +75,8 @@ function ToastHost() {
   );
 }
 
-/* ---- Authenticated Main App Shell ---- */
-function App({
+/* ---- User App Shell (role=user only) ---- */
+function UserApp({
   user,
   onUserChange,
   onLogout
@@ -115,7 +129,7 @@ function App({
     });
   };
 
-  // Keyboard shortcut: Cmd+K opens search / navigation focus
+  // Keyboard shortcut: Cmd+K opens search
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -166,17 +180,17 @@ function App({
   return (
     <main className={`${light ? 'light' : ''} ${collapsed ? 'rail-collapsed' : ''}`}>
       {/* Mobile Drawer Scrim */}
-      <div 
-        className={`nav-scrim ${menu ? 'show' : ''}`} 
-        onClick={() => setMenu(false)} 
-        aria-hidden="true" 
+      <div
+        className={`nav-scrim ${menu ? 'show' : ''}`}
+        onClick={() => setMenu(false)}
+        aria-hidden="true"
       />
 
-      {/* Futuristic Glassmorphic Sidebar */}
+      {/* Sidebar */}
       <aside className={`${menu ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-brand-row">
           <Logo />
-          <button 
+          <button
             className="collapse-toggle-btn"
             onClick={() => setCollapsed(!collapsed)}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -191,7 +205,7 @@ function App({
           <b>Sentinel Operations</b>
         </div>
 
-        {/* Nav Links */}
+        {/* Nav Links — user nav only, no admin links */}
         <nav className="sidebar-nav">
           {nav.map(({ name, icon: Icon }) => (
             <button
@@ -211,14 +225,14 @@ function App({
           ))}
         </nav>
 
-        {/* Account Row at bottom of sidebar */}
+        {/* Account Row */}
         <div className="sidebar-account-row" onClick={() => setPage('Settings')}>
           <div className="avatar-chip">
             {(user.name || 'U').slice(0, 2).toUpperCase()}
           </div>
           <div className="account-text">
-            <b>{user.name || 'Admin User'}</b>
-            <p>{user.email || 'admin@sonicsentinel.com'}</p>
+            <b>{user.name}</b>
+            <p>{user.email}</p>
           </div>
           <button className="account-menu-trigger" onClick={(e) => { e.stopPropagation(); onLogout(); }} title="Sign out">
             <LogOut size={16} />
@@ -228,11 +242,11 @@ function App({
 
       {/* Main Shell */}
       <div className="app-shell">
-        {/* Top Header Bar matching reference */}
+        {/* Top Header Bar */}
         <header className="app-top-header">
-          <button 
-            className="mobile-toggle-btn" 
-            aria-label="Toggle menu" 
+          <button
+            className="mobile-toggle-btn"
+            aria-label="Toggle menu"
             onClick={() => setMenu(!menu)}
           >
             {menu ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
@@ -241,14 +255,14 @@ function App({
           {/* Search bar */}
           <div className="top-search-box">
             <Search size={16} className="search-icon" />
-            <input 
-              className="top-search-input" 
-              placeholder="Search detections, alerts, or telemetry..." 
+            <input
+              className="top-search-input"
+              placeholder="Search detections, alerts, or telemetry..."
             />
             <kbd className="search-kbd">⌘ K</kbd>
           </div>
 
-          {/* Right Header Status & Controls */}
+          {/* Right Header */}
           <div className="top-header-right">
             {/* System Online Badge */}
             <div className="system-status-indicator">
@@ -262,31 +276,31 @@ function App({
             </div>
 
             {/* Theme Toggle */}
-            <button 
-              className="header-icon-btn" 
-              onClick={toggleLight} 
+            <button
+              className="header-icon-btn"
+              onClick={toggleLight}
               title={light ? 'Switch to Dark mode' : 'Switch to Light mode'}
             >
               {light ? <Sun size={17} /> : <Moon size={17} />}
             </button>
 
             {/* Notifications Bell */}
-            <button 
-              className="header-icon-btn bell-btn" 
-              onClick={() => setPage('Alerts')} 
+            <button
+              className="header-icon-btn bell-btn"
+              onClick={() => setPage('Alerts')}
               title="Alert notifications"
             >
               <Bell size={17} />
               {unread > 0 && <span className="bell-badge-dot" />}
             </button>
 
-            {/* User Avatar */}
-            <div 
-              className="header-avatar-circle" 
+            {/* User Role indicator — shows USER role clearly */}
+            <div
+              className="header-avatar-circle"
               onClick={() => setPage('Settings')}
-              title={`Logged in as ${user.name}`}
+              title={`Logged in as ${user.name} (${user.role})`}
             >
-              {(user.name || 'A').slice(0, 2).toUpperCase()}
+              {(user.name || 'U').slice(0, 2).toUpperCase()}
             </div>
           </div>
         </header>
@@ -312,7 +326,7 @@ function App({
   );
 }
 
-/* ---- Root Component (Handles Auth State & Routing) ---- */
+/* ---- Root Component — Role-Based Routing ---- */
 function Root() {
   const { user, loading } = useAuth();
   const [view, setView] = useState<'landing' | 'auth'>('landing');
@@ -330,16 +344,31 @@ function Root() {
   }
 
   const currentUser = activeUser ?? user;
+
   if (currentUser) {
+    const handleLogout = async () => {
+      await authApi.logout();
+      setActiveUser(null);
+      window.location.reload();
+    };
+
+    // SECURITY: Role-based routing — server-verified role from /auth/me
+    if (currentUser.role === 'admin') {
+      // Admin users always go to the Admin Dashboard
+      return (
+        <AdminDashboard
+          user={currentUser}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    // Normal users (role=user) go to the User Dashboard
     return (
-      <App 
-        user={currentUser} 
-        onUserChange={setActiveUser} 
-        onLogout={async () => {
-          await authApi.logout();
-          setActiveUser(null);
-          window.location.reload();
-        }} 
+      <UserApp
+        user={currentUser}
+        onUserChange={setActiveUser}
+        onLogout={handleLogout}
       />
     );
   }
@@ -349,7 +378,7 @@ function Root() {
     return (
       <div className="auth-page-wrapper">
         <div className="auth-page-container">
-          <AuthCard 
+          <AuthCard
             initialMode={authInitialMode}
             onCancel={() => setView('landing')}
           />
@@ -360,16 +389,16 @@ function Root() {
 
   // Cinematic Landing Page
   return (
-    <LandingPage 
+    <LandingPage
       onStart={(mode) => {
         setAuthInitialMode(mode);
         setView('auth');
-      }} 
+      }}
     />
   );
 }
 
-/* ---- Error Boundary to Prevent Blank Screen ---- */
+/* ---- Error Boundary ---- */
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error: Error | null }
@@ -392,7 +421,7 @@ class ErrorBoundary extends React.Component<
             <Logo large />
             <h3>Neural Interface Desynchronized</h3>
             <p>{this.state.error?.message || 'An unexpected rendering error occurred.'}</p>
-            <button 
+            <button
               className="primary-glow-btn compact"
               onClick={() => window.location.reload()}
             >

@@ -1,0 +1,13 @@
+node_modules
+.git
+.env
+.env.local
+ml-service/.env
+ml-service/__pycache__
+ml-service/app/__pycache__
+ml-service/data/uploads/*
+!ml-service/data/uploads/.gitkeep
+dist
+build
+.opencode
+*.log
