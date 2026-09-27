@@ -586,6 +586,41 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
   const [error, setError] = useState('');
   const [audioMeta, setAudioMeta] = useState<{ duration: number; sampleRate: number; channels: number } | null>(null);
 
+  // Google Teachable Machine state
+  const [gtmResult, setGtmResult] = useState<{ label: string; confidence: number }[] | null>(null);
+  const [gtmLoading, setGtmLoading] = useState(false);
+  const [gtmError, setGtmError] = useState('');
+
+  // GTM Model URL — replace with your actual Teachable Machine model URL
+  const GTM_MODEL_URL = 'https://teachablemachine.withgoogle.com/models/YOUR_GTM_MODEL_ID/';
+
+  const runGTMAnalysis = async (audioFile: File) => {
+    try {
+      const tm = (window as any).tmAudio;
+      if (!tm) { setGtmError('Teachable Machine library not loaded'); return; }
+      setGtmLoading(true);
+      setGtmError('');
+      setGtmResult(null);
+
+      const modelURL = GTM_MODEL_URL + 'model.json';
+      const metadataURL = GTM_MODEL_URL + 'metadata.json';
+
+      const model = await tm.load(modelURL, metadataURL);
+      const url = URL.createObjectURL(audioFile);
+      const predictions = await model.predictAudio(url);
+      URL.revokeObjectURL(url);
+
+      const sorted = [...predictions].sort((a: any, b: any) => b.probability - a.probability);
+      setGtmResult(sorted.map((p: any) => ({ label: p.className, confidence: p.probability })));
+    } catch (e: any) {
+      setGtmError('GTM model not configured. Please set your Teachable Machine model URL.');
+    } finally {
+      setGtmLoading(false);
+    }
+  };
+
+
+
   // Read metadata when file is loaded
   const onFileSelected = (selectedFile: File) => {
     setFile(selectedFile);
@@ -622,6 +657,8 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
     if (!file) return;
     setStage('processing');
     setError('');
+    setGtmResult(null);
+    setGtmError('');
     const fd = new FormData();
     fd.append('audio', file);
 
@@ -631,6 +668,8 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       });
       setResult(r.data);
       setStage('done');
+      // Run GTM analysis in parallel (non-blocking)
+      runGTMAnalysis(file);
     } catch (err: any) {
       setError(err.response?.data?.detail ?? 'Audio analysis failed. Check file format.');
       setStage('idle');
@@ -816,6 +855,49 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
               <strong style={{ color: 'var(--cyan)', fontSize: '15px' }}>{result.classification}</strong>
               <small style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{pct(result.confidence)} Combined Score</small>
             </div>
+          </div>
+
+          {/* Google Teachable Machine Results */}
+          <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+              <img src="https://teachablemachine.withgoogle.com/assets/img/favicon.ico" alt="GTM" style={{ width: 18, height: 18, borderRadius: 4 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              <span style={{ fontWeight: 700, fontSize: 13, color: '#ffffff' }}>Google Teachable Machine</span>
+              <span style={{ fontSize: 11, color: '#8a99ad', marginLeft: 4 }}>Independent Classifier (Secondary Model)</span>
+            </div>
+
+            {gtmLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8a99ad', fontSize: 13 }}>
+                <Loader2 size={14} className="spin" />
+                <span>Teachable Machine analyzing audio...</span>
+              </div>
+            )}
+
+            {gtmError && !gtmLoading && (
+              <div style={{ background: 'rgba(255,184,0,0.08)', border: '1px solid rgba(255,184,0,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#ffb800' }}>
+                ⚠️ {gtmError}
+              </div>
+            )}
+
+            {gtmResult && !gtmLoading && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {gtmResult.slice(0, 5).map((p, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: i === 0 ? '#00f0ff' : '#8a99ad', fontWeight: i === 0 ? 700 : 400, minWidth: 180 }}>
+                      {i === 0 && '🏆 '}{p.label}
+                    </span>
+                    <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${(p.confidence * 100).toFixed(1)}%`, background: i === 0 ? 'linear-gradient(90deg, #00f0ff, #0070f3)' : '#1e3460', borderRadius: 4, transition: 'width 0.4s ease' }} />
+                    </div>
+                    <span style={{ fontSize: 12, color: i === 0 ? '#00f0ff' : '#8a99ad', fontWeight: 600, minWidth: 48, textAlign: 'right' }}>
+                      {(p.confidence * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
+                <p style={{ fontSize: 11, color: '#5a6a80', marginTop: 6 }}>
+                  GTM Top Prediction: <strong style={{ color: '#00f0ff' }}>{gtmResult[0]?.label}</strong> — {(gtmResult[0]?.confidence * 100).toFixed(1)}% confident
+                </p>
+              </div>
+            )}
           </div>
         </motion.section>
       )}
