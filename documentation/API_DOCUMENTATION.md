@@ -1,46 +1,74 @@
-# API Documentation
+# SonicSentinel AI — REST API Documentation
 
-Source: ml-service/app/main.py (inspected).
+## Base URL
+- Local: `http://localhost:8000`
+- Production: `https://<railway-domain>.up.railway.app`
 
-| Method | Path | Success status |
-|---|---|---|
-| GET | /auth/google | 200 |
-| GET | /auth/google/callback | 200 |
-| GET | /auth/facebook | 200 |
-| GET | /auth/facebook/callback | 200 |
-| GET | /health | 200 |
-| POST | /auth/register | 201 |
-| POST | /auth/login | 200 |
-| GET | /auth/me | 200 |
-| PATCH | /auth/profile | 200 |
-| POST | /auth/logout | 204 |
-| POST | /auth/forgot-password | 202 |
-| POST | /detections/analyze | 201 |
-| POST | /predict | 201 |
-| GET | /detections | 200 |
-| GET | /detections/{detection_id} | 200 |
-| GET | /detections/{detection_id}/audio | 200 |
-| GET | /alerts | 200 |
-| PATCH | /alerts/{alert_id} | 200 |
-| GET | /reviews | 200 |
-| POST | /reviews | 201 |
-| GET | /models | 200 |
-| GET | /model/status | 200 |
-| GET | /reports/overview | 200 |
-| GET | /reports/activity | 200 |
-| GET | /reports/severity | 200 |
-| POST | /live/sessions/start | 201 |
-| POST | /live/sessions/{session_id}/stop | 200 |
-| GET | /live/sessions | 200 |
-| GET | /live/sessions/active | 200 |
-| POST | /live/analyze | 201 |
-| GET | /api/admin/overview | 200 |
-| GET | /api/admin/users | 200 |
-| GET | /api/admin/users/{user_id} | 200 |
-| PATCH | /api/admin/users/{user_id} | 200 |
-| DELETE | /api/admin/users/{user_id} | 204 |
-| GET | /api/admin/detections | 200 |
-| GET | /api/admin/alerts | 200 |
-| GET | /api/admin/reports | 200 |
-| GET | /api/admin/system | 200 |
-| GET | /api/admin/logs | 200 |
+## Authentication
+Session cookie authentication via `sonic_session` cookie or HTTP Bearer token.
+
+---
+
+## 1. Public Authentication Endpoints
+
+### `POST /auth/register`
+- **Purpose**: Public user registration. Always assigns `role = "user"`.
+- **Request Body**: `{"name": "...", "email": "...", "password": "..."}`
+- **Response**: `201 Created` — `{"id": "...", "name": "...", "email": "...", "role": "user"}`
+- **Security**: Client attempts to pass `role="admin"` are strictly ignored.
+
+### `POST /auth/login`
+- **Purpose**: Authenticates user or administrator.
+- **Request Body**: `{"email": "...", "password": "..."}`
+- **Response**: `200 OK` — `{"id": "...", "role": "user"|"admin", ...}` + sets `sonic_session` HTTP-only cookie.
+- **Errors**: `401 Unauthorized` for invalid credentials.
+
+### `POST /auth/logout`
+- **Purpose**: Terminates user session.
+- **Response**: `200 OK`.
+
+### `GET /auth/me`
+- **Purpose**: Fetches current authenticated user profile.
+- **Response**: `200 OK` — User details (no password hash exposed).
+
+---
+
+## 2. Detection & Audio Endpoints
+
+### `POST /detections/analyze`
+- **Purpose**: Analyzes uploaded audio clip using the 3-Model ML Ensemble.
+- **Content-Type**: `multipart/form-data`
+- **Form Data**: `audio`: File (WAV/MP3/OGG/FLAC/AAC/M4A), `source`: "upload" | "live"
+- **Response**: `201 Created` — Complete classification, confidence score, 3-model breakdown, severity.
+
+### `GET /detections`
+- **Purpose**: Lists user's past detections (scoped to authenticated user).
+- **Response**: `200 OK` — Array of detection objects.
+
+---
+
+## 3. Live Microphone Endpoints
+
+### `POST /live/sessions/start`
+- **Purpose**: Starts a live microphone monitoring session.
+- **Response**: `201 Created` — Session object.
+
+### `POST /live/analyze`
+- **Purpose**: Analyzes 3.5s live audio chunk from microphone stream.
+- **Response**: `201 Created` — Real-time detection result.
+
+---
+
+## 4. Admin Management Endpoints (`require_admin` Guarded)
+
+### `GET /api/admin/overview`
+- **Purpose**: System-wide analytics and KPIs. Access: Admin only.
+
+### `GET /api/admin/users`
+- **Purpose**: Lists all platform users with filtering and pagination. Access: Admin only.
+
+### `PATCH /api/admin/users/{user_id}`
+- **Purpose**: Activates or deactivates user accounts. Access: Admin only.
+
+### `DELETE /api/admin/users/{user_id}`
+- **Purpose**: Deletes user and all associated data. Access: Admin only.

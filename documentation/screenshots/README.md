@@ -1,3 +1,9 @@
-# Screenshot Evidence
+# Screenshots Directory
 
-No automated browser captures are stored. Required captures: landing, login, signup, dashboard, upload, prediction, alerts, history, reports, live microphone, manual review, and admin dashboard.
+Contains actual UI screenshots of SonicSentinel AI:
+- `01_landing_page.png`
+- `02_user_dashboard.png`
+- `03_audio_analyze.png`
+- `04_live_microphone.png`
+- `05_admin_dashboard.png`
+- `06_event_history.png`
