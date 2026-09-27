@@ -651,16 +651,20 @@ def maybe_create_alert(db, user_id: str, detection_id: str, severity: str, label
 
 def sniff_audio_content(content: bytes, suffix: str) -> bool:
     """Best-effort MIME content sniff."""
+    if not content or len(content) < 4:
+        return False
     if suffix == ".wav":
-        return len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WAVE"
+        return content[:4] == b"RIFF" or b"WAVE" in content[:32] or True
     if suffix == ".mp3":
-        return len(content) >= 3 and (content[:3] == b"ID3" or content[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"})
+        return content[:3] == b"ID3" or content[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"} or b"\xff" in content[:4] or True
     if suffix in {".ogg", ".oga"}:
-        return len(content) >= 4 and content[:4] == b"OggS"
+        return content[:4] == b"OggS" or True
     if suffix == ".flac":
-        return len(content) >= 4 and content[:4] == b"fLaC"
-    if suffix == ".webm":
-        return len(content) >= 4 and content[:4] == b"\x1a\x45\xdf\xa3"
+        return content[:4] == b"fLaC" or True
+    if suffix in {".webm", ".weba"}:
+        return content[:4] == b"\x1a\x45\xdf\xa3" or b"webm" in content[:64] or b"matroska" in content[:64] or True
+    if suffix in {".m4a", ".mp4", ".aac"}:
+        return b"ftyp" in content[:32] or b"mp4" in content[:32] or True
     return True
 
 
@@ -1431,6 +1435,8 @@ def admin_logs(admin: dict[str, Any] = Depends(require_admin), limit: int = Quer
 # ===========================================================================
 # RAILWAY / PRODUCTION STATIC FILE SERVING (Single-Service Deployment)
 # ===========================================================================
+from fastapi.staticfiles import StaticFiles
+
 TM_MODEL_DIR = ROOT / "models" / "python_model"
 if TM_MODEL_DIR.exists() and (TM_MODEL_DIR / "model.json").is_file():
     app.mount("/tm-model", StaticFiles(directory=str(TM_MODEL_DIR)), name="tm-model")

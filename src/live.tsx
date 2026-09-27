@@ -127,6 +127,9 @@ function AudioMonitor(){
       setListening(true);
 
       const ctx = new AudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
       ctxRef.current = ctx;
       const src = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
@@ -136,9 +139,13 @@ function AudioMonitor(){
       analyserRef.current = analyser;
       drawVisualizer();
 
-      const s = await sessionsApi.start('microphone');
-      sessionIdRef.current = s.data.id;
-      setSession(s.data);
+      try {
+        const s = await sessionsApi.start('microphone');
+        sessionIdRef.current = s.data.id;
+        setSession(s.data);
+      } catch {
+        sessionIdRef.current = null;
+      }
 
       recordChunk();
       intervalRef.current = setInterval(recordChunk, 3700);
