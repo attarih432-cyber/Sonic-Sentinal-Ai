@@ -15,6 +15,7 @@ import math
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 import wave
@@ -625,8 +626,55 @@ def detection_out(item: dict[str, Any], audio=False):
     return output
 
 
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+
+
+def send_resend_alert_email(to_email: str, severity: str, label: str, filename: str, detection_id: str) -> None:
+    """Send real-time HTML security alert email via Resend API in background thread."""
+    def _send():
+        if not RESEND_API_KEY:
+            return
+        subject = f"🚨 [{severity.upper()}] SonicSentinel AI Threat Alert: {label}"
+        color = "#ff3366" if severity == "critical" else "#ffb800"
+        html_body = f"""
+        <div style="background-color: #070b12; color: #ffffff; padding: 24px; font-family: sans-serif; border-radius: 8px;">
+            <div style="border-bottom: 2px solid {color}; padding-bottom: 12px; margin-bottom: 20px;">
+                <h2 style="color: {color}; margin: 0;">🚨 SonicSentinel AI — {severity.upper()} ALERT</h2>
+                <p style="color: #8a99ad; margin: 4px 0 0 0; font-size: 13px;">Real-Time Acoustic Intelligence Threat Notification</p>
+            </div>
+            <div style="background-color: #0d1527; padding: 18px; border-radius: 6px; border-left: 4px solid {color}; margin-bottom: 20px;">
+                <p style="margin: 0 0 8px 0;"><strong>Detected Threat:</strong> <span style="color: {color}; font-weight: bold;">{label}</span></p>
+                <p style="margin: 0 0 8px 0;"><strong>Severity Level:</strong> <span style="text-transform: uppercase; color: {color}; font-weight: bold;">{severity}</span></p>
+                <p style="margin: 0 0 8px 0;"><strong>Audio Recording:</strong> {filename}</p>
+                <p style="margin: 0;"><strong>Detection Reference:</strong> <code style="color: #00f0ff;">{detection_id}</code></p>
+            </div>
+            <p style="font-size: 12px; color: #8a99ad;">This automated threat alert was dispatched by the SonicSentinel AI 3-Model Ensemble Engine.</p>
+        </div>
+        """
+        try:
+            target_to = [to_email] if (to_email and "@" in to_email and not to_email.endswith(".dev")) else ["delivered@resend.dev"]
+            requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": "SonicSentinel AI Alerts <onboarding@resend.dev>",
+                    "to": target_to,
+                    "subject": subject,
+                    "html": html_body
+                },
+                timeout=8
+            )
+        except Exception as err:
+            print(f"Resend alert email dispatch failed: {err}", flush=True)
+
+    threading.Thread(target=_send, daemon=True).start()
+
+
 def maybe_create_alert(db, user_id: str, detection_id: str, severity: str, label: str, filename: str) -> None:
-    """Create an alert for high/critical events with cooldown dedupe."""
+    """Create an alert for high/critical events with cooldown dedupe and send Resend email alert."""
     if severity not in {"high", "critical"}:
         return
     since = (datetime.now(timezone.utc) - timedelta(seconds=ALERT_COOLDOWN_SECONDS)).isoformat()
@@ -647,6 +695,11 @@ def maybe_create_alert(db, user_id: str, detection_id: str, severity: str, label
             "created_at": now(),
         }
     )
+
+    # Fetch user email for real-time Resend notification
+    user = db.users.find_one({"_id": oid(user_id, "user")}) if user_id else None
+    user_email = user.get("email", "") if user else ""
+    send_resend_alert_email(user_email, severity, label, filename, detection_id)
 
 
 def sniff_audio_content(content: bytes, suffix: str) -> bool:
