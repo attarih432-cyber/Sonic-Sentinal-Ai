@@ -591,8 +591,8 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
   const [gtmLoading, setGtmLoading] = useState(false);
   const [gtmError, setGtmError] = useState('');
 
-  // GTM Model URL — replace with your actual Teachable Machine model URL
-  const GTM_MODEL_URL = 'https://teachablemachine.withgoogle.com/models/YOUR_GTM_MODEL_ID/';
+  // GTM Model URL — points to local /tm-model/ endpoint serving model.json, metadata.json, weights.bin
+  const GTM_MODEL_URL = '/tm-model/';
 
   const runGTMAnalysis = async (audioFile: File) => {
     try {
@@ -602,8 +602,9 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       setGtmError('');
       setGtmResult(null);
 
-      const modelURL = GTM_MODEL_URL + 'model.json';
-      const metadataURL = GTM_MODEL_URL + 'metadata.json';
+      const host = window.location.port === '5173' ? 'http://localhost:8000' : '';
+      const modelURL = host + GTM_MODEL_URL + 'model.json';
+      const metadataURL = host + GTM_MODEL_URL + 'metadata.json';
 
       const model = await tm.load(modelURL, metadataURL);
       const url = URL.createObjectURL(audioFile);
@@ -613,7 +614,7 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       const sorted = [...predictions].sort((a: any, b: any) => b.probability - a.probability);
       setGtmResult(sorted.map((p: any) => ({ label: p.className, confidence: p.probability })));
     } catch (e: any) {
-      setGtmError('GTM model not configured. Please set your Teachable Machine model URL.');
+      setGtmError('GTM local model evaluation error: ' + (e.message || e));
     } finally {
       setGtmLoading(false);
     }

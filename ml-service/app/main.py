@@ -1431,7 +1431,9 @@ def admin_logs(admin: dict[str, Any] = Depends(require_admin), limit: int = Quer
 # ===========================================================================
 # RAILWAY / PRODUCTION STATIC FILE SERVING (Single-Service Deployment)
 # ===========================================================================
-from fastapi.staticfiles import StaticFiles
+TM_MODEL_DIR = ROOT / "models" / "python_model"
+if TM_MODEL_DIR.exists() and (TM_MODEL_DIR / "model.json").is_file():
+    app.mount("/tm-model", StaticFiles(directory=str(TM_MODEL_DIR)), name="tm-model")
 
 DIST_DIR = ROOT / "dist"
 if not DIST_DIR.exists():
@@ -1444,8 +1446,8 @@ if DIST_DIR.exists() and (DIST_DIR / "index.html").is_file():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # Allow API / Auth endpoints to pass through
-        if full_path.startswith(("api/", "auth/", "detections/", "live/", "models/", "reports/", "reviews/", "health")):
+        # Allow API / Auth / Model endpoints to pass through
+        if full_path.startswith(("api/", "auth/", "detections/", "live/", "models/", "tm-model/", "reports/", "reviews/", "health")):
             raise HTTPException(404, f"API endpoint not found: /{full_path}")
         file_path = DIST_DIR / full_path
         if file_path.is_file():
