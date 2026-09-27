@@ -68,47 +68,112 @@ function AudioMonitor(){
     }catch{ setPerm('granted'); }
   };
 
-  useEffect(()=>{ checkPermission(); api.get('/models').then(r=>{const m=r.data.find((x:any)=>x.id==='python-engine'); setModelStatus(m?.status??'');}).catch(()=>{}); return cleanup; },[]); // eslint-disable-line react-hooks/exhaustive-deps
+  const intervalRef = useRef<any>(null);
+  const listeningRef = useRef(false);
 
-  const start=async()=>{
+  useEffect(() => {
+    checkPermission();
+    api.get('/models').then(r => {
+      const loaded = Array.isArray(r.data) && r.data.some((x: any) => x.status === 'loaded');
+      setModelStatus(loaded ? 'loaded' : 'active');
+    }).catch(() => {});
+    return cleanup;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const recordChunk = useCallback(() => {
+    if (!streamRef.current || !listeningRef.current) return;
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+    let rec: MediaRecorder;
+    try {
+      rec = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
+    } catch {
+      rec = new MediaRecorder(streamRef.current);
+    }
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    rec.onstop = () => {
+      if (chunks.length === 0 || !listeningRef.current) return;
+      const blob = new Blob(chunks, { type: mime || 'audio/webm' });
+      const ext = mime.includes('mp4') ? 'm4a' : 'webm';
+      const fname = `live_mic_${Date.now()}.${ext}`;
+      liveApi.analyzeChunk(blob, fname, sessionIdRef.current).then(r => {
+        const det = r.data;
+        resultsRef.current = [det, ...resultsRef.current].slice(0, 25);
+        setResults([...resultsRef.current]);
+        if (det.severity === 'high' || det.severity === 'critical') {
+          window.dispatchEvent(new CustomEvent('sonic:toast', { detail: { type: 'alert', message: `${det.severity.toUpperCase()}: ${det.classification} detected` } }));
+        }
+      }).catch(e => {
+        const msg = e.response?.data?.detail ?? 'Chunk analysis failed';
+        setErr(msg);
+      });
+    };
+    rec.start();
+    setTimeout(() => {
+      if (rec.state === 'recording') {
+        try { rec.stop(); } catch {}
+      }
+    }, 3500);
+  }, []);
+
+  const start = async () => {
     setErr('');
-    try{ setPerm('requesting');
-      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-      streamRef.current=stream; setPerm('granted');
-      const ctx=new AudioContext(); ctxRef.current=ctx;
-      const src=ctx.createMediaStreamSource(stream);
-      const analyser=ctx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.75;
-      src.connect(analyser); analyserRef.current=analyser;
+    try {
+      setPerm('requesting');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      setPerm('granted');
+      listeningRef.current = true;
+      setListening(true);
+
+      const ctx = new AudioContext();
+      ctxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.75;
+      src.connect(analyser);
+      analyserRef.current = analyser;
       drawVisualizer();
-      const s=await sessionsApi.start('microphone'); sessionIdRef.current=s.data.id; setSession(s.data);
-      // MediaRecorder chunks (4s)
-      const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'';
-      const rec=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
-      recorderRef.current=rec; chunkRef.current=[];
-      rec.ondataavailable=(e)=>{ if(e.data&&e.data.size>0) chunkRef.current.push(e.data); };
-      rec.onstop=()=>{
-        const blob=new Blob(chunkRef.current,{type:mime||'audio/webm'});
-        chunkRef.current=[];
-        const ext=mime.includes('mp4')?'m4a':'webm';
-        const fname=`chunk_${Date.now()}.${ext}`;
-        liveApi.analyzeChunk(blob,fname,sessionIdRef.current).then(r=>{
-          const det=r.data; resultsRef.current=[det,...resultsRef.current].slice(0,20); setResults(resultsRef.current);
-          if(det.severity==='high'||det.severity==='critical'){ window.dispatchEvent(new CustomEvent('sonic:toast',{detail:{type:'alert',message:`${det.severity.toUpperCase()}: ${det.classification} detected`}})); }
-        }).catch(e=>{ const msg=e.response?.data?.detail??'Chunk analysis failed'; setErr(msg); window.dispatchEvent(new CustomEvent('sonic:toast',{detail:{type:'error',message:msg}})); });
-      };
-      rec.start(4000); setListening(true);
-      window.dispatchEvent(new CustomEvent('sonic:toast',{detail:{type:'info',message:'Mic listening started'}}));
-    }catch(e:any){ setPerm('denied'); setErr(e.name==='NotAllowedError'?'Microphone permission denied':e.name==='NotFoundError'?'No microphone found':e.message??'Mic start failed'); }
+
+      const s = await sessionsApi.start('microphone');
+      sessionIdRef.current = s.data.id;
+      setSession(s.data);
+
+      recordChunk();
+      intervalRef.current = setInterval(recordChunk, 3700);
+
+      window.dispatchEvent(new CustomEvent('sonic:toast', { detail: { type: 'info', message: 'Mic listening started' } }));
+    } catch (e: any) {
+      listeningRef.current = false;
+      setListening(false);
+      setPerm('denied');
+      setErr(e.name === 'NotAllowedError' ? 'Microphone permission denied' : e.name === 'NotFoundError' ? 'No microphone found' : e.message ?? 'Mic start failed');
+    }
   };
 
-  const stop=async()=>{
+  const stop = async () => {
+    listeningRef.current = false;
     setListening(false);
-    if(recorderRef.current&&recorderRef.current.state!=='inactive'){ recorderRef.current.stop(); }
-    if(sessionIdRef.current){ try{ const s=await sessionsApi.stop(sessionIdRef.current); setSession(s.data); }catch{} }
-    stopTracks(); if(ctxRef.current){ ctxRef.current.close().catch(()=>{}); ctxRef.current=null; }
-    cancelAnimationFrame(rafRef.current); setRms(0);
-    sessionIdRef.current=null;
-    window.dispatchEvent(new CustomEvent('sonic:toast',{detail:{type:'info',message:'Mic stopped — recording saved'}}));
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (sessionIdRef.current) {
+      try {
+        const s = await sessionsApi.stop(sessionIdRef.current);
+        setSession(s.data);
+      } catch {}
+    }
+    stopTracks();
+    if (ctxRef.current) {
+      ctxRef.current.close().catch(() => {});
+      ctxRef.current = null;
+    }
+    cancelAnimationFrame(rafRef.current);
+    setRms(0);
+    sessionIdRef.current = null;
+    window.dispatchEvent(new CustomEvent('sonic:toast', { detail: { type: 'info', message: 'Mic stopped — session saved' } }));
   };
 
   const clearResults=()=>{ resultsRef.current=[]; setResults([]); };
