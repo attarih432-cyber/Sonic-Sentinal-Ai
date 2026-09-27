@@ -638,7 +638,7 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       // Display model class labels when offline decoding completes
       const pairs = labels.map((lbl: string, idx: number) => ({
         label: lbl.trim(),
-        confidence: idx === 0 ? 0.92 : 0.08 / max(1, labels.length - 1)
+        confidence: idx === 0 ? 0.92 : 0.08 / Math.max(1, labels.length - 1)
       }));
       setGtmResult(pairs);
     } catch (e: any) {
