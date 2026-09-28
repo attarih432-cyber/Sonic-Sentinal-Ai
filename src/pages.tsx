@@ -594,10 +594,36 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
   // GTM Model URL — points to local /tm-model/ endpoint serving model.json, metadata.json, weights.bin
   const GTM_MODEL_URL = '/tm-model/';
 
+  const ensureGtmRuntime = async () => {
+    const runtime = window as any;
+    if (runtime.tf && runtime.speechCommands) return runtime.speechCommands;
+
+    const loadScript = (id: string, source: string) => new Promise<void>((resolve, reject) => {
+      const existing = document.getElementById(id) as HTMLScriptElement | null;
+      if (existing) {
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error(`Unable to load ${id}.`)), { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = id;
+      script.src = source;
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Unable to load ${id}.`));
+      document.head.appendChild(script);
+    });
+
+    await loadScript('sonic-tfjs-runtime', '/vendor/tf.min.js');
+    await loadScript('sonic-speech-commands-runtime', '/vendor/speech-commands.min.js');
+    if (!runtime.speechCommands?.create) {
+      throw new Error('The Teachable Machine runtime could not be initialized.');
+    }
+    return runtime.speechCommands;
+  };
+
   const runGTMAnalysis = async (audioFile: File) => {
     try {
-      const sc = (window as any).speechCommands;
-      if (!sc) { setGtmError('Teachable Machine speech-commands library not loaded'); return; }
       setGtmLoading(true);
       setGtmError('');
       setGtmResult(null);
@@ -606,7 +632,9 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       const checkpointURL = host + '/tm-model/model.json';
       const metadataURL = host + '/tm-model/metadata.json';
 
-      const recognizer = sc.create(
+      const speechCommands = await ensureGtmRuntime();
+
+      const recognizer = speechCommands.create(
         'BROWSER_FFT',
         undefined,
         checkpointURL,
@@ -649,32 +677,28 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
         const rawPredictions = await recognizer.recognize(sliceData);
         if (rawPredictions && rawPredictions.scores) {
           const scores = Array.from(rawPredictions.scores as Float32Array);
-          const pairs = labels.map((lbl: string, idx: number) => ({
-            label: lbl.trim(),
-            confidence: Math.max(0.01, scores[idx] || 0)
-          })).sort((a: any, b: any) => b.confidence - a.confidence);
-
-          const totalProb = pairs.reduce((sum: number, p: any) => sum + p.confidence, 0) || 1;
-          const normalized = pairs.map((p: any) => ({
-            label: p.label,
-            confidence: p.confidence / totalProb
-          }));
-          setGtmResult(normalized);
+          const aliases: Record<string, string> = {
+            'alaram or siren': 'Alarm or Siren',
+            'alarm or siren': 'Alarm or Siren',
+            'vehical horn': 'Vehicle Horn',
+            'vehicle horn': 'Vehicle Horn',
+            'animal sound': 'Animal Sound',
+          };
+          const pairs = labels.map((lbl: string, idx: number) => {
+            const rawLabel = lbl.trim();
+            return {
+              label: aliases[rawLabel.toLowerCase()] || rawLabel,
+              confidence: Number(scores[idx] ?? 0)
+            };
+          }).sort((a: any, b: any) => b.confidence - a.confidence);
+          setGtmResult(pairs);
           return;
         }
       } catch {}
 
-      // Fallback matching actual detected audio class
-      const targetClass = result?.classification || 'Background Noise';
-      const pairs = labels.map((lbl: string) => {
-        const cleanLabel = lbl.trim();
-        const matches = cleanLabel.toLowerCase().includes(targetClass.toLowerCase()) || targetClass.toLowerCase().includes(cleanLabel.toLowerCase());
-        return {
-          label: cleanLabel,
-          confidence: matches ? 0.88 : 0.012
-        };
-      }).sort((a: any, b: any) => b.confidence - a.confidence);
-      setGtmResult(pairs);
+      // Never synthesize a Teachable Machine score from the Python result.
+      setGtmResult(null);
+      setGtmError('Teachable Machine could not produce a prediction for this audio.');
     } catch (e: any) {
       setGtmError('GTM model error: ' + (e.message || e));
     } finally {
@@ -899,9 +923,9 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
 
           <div className="result-inference-grid">
             <div className="inf-tile">
-              <span className="inf-label">Random Forest (93.7%)</span>
-              <strong>{result.models?.randomForest?.classification || result.classification}</strong>
-              <small>{pct(result.models?.randomForest?.confidence ?? result.confidence)} confidence</small>
+              <span className="inf-label">YAMNet Classifier</span>
+              <strong>{result.models?.yamnet?.classification || result.classification}</strong>
+              <small>{pct(result.models?.yamnet?.confidence ?? result.confidence)} confidence</small>
             </div>
             <div className="inf-tile">
               <span className="inf-label">SVM Pipeline (91.6%)</span>
@@ -1559,7 +1583,7 @@ export function ModelsPage() {
             <Cpu size={24} className="text-cyan" />
             <div>
               <h3>Python ML Engine</h3>
-              <p className="muted">Ensemble: Random Forest + Support Vector Machine</p>
+              <p className="muted">Ensemble: YAMNet + Support Vector Machine + CNN</p>
             </div>
             <span className="pill seg-ok">Active</span>
           </div>

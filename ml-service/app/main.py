@@ -39,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", ROOT / "data" / "uploads"))
 MODEL_PATH = Path(os.getenv("MODEL_PATH", ROOT / "models" / "python_model" / "model.pkl"))
+YAMNET_MODEL_PATH = Path(os.getenv("YAMNET_MODEL_PATH", ROOT / "models" / "python_model" / "sonicsentinel_yamnet_model.pkl"))
 MODEL_METADATA_PATH = Path(os.getenv("MODEL_METADATA_PATH", ROOT / "models" / "python_model" / "metadata.json"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
 SESSION_DAYS, COOKIE_NAME = int(os.getenv("SESSION_DAYS", "7")), "sonic_session"
@@ -58,6 +59,17 @@ FACEBOOK_REDIRECT_URI = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:800
 ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "60"))
 
 app = FastAPI(title="SonicSentinel API", version="1.2.0")
+
+
+def python_model_status() -> str:
+    """Report the configured model accurately without claiming an untested runtime is loaded."""
+    if YAMNET_MODEL_PATH.is_file():
+        return "configured"
+    if MODEL_PATH.is_file():
+        return "loaded"
+    return "unavailable"
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")],
@@ -237,6 +249,26 @@ def current_user(sonic_session: str | None = Cookie(default=None)) -> dict[str, 
     if not user.get("active", True):
         raise HTTPException(403, "Your account has been deactivated. Contact an administrator.")
     return user
+
+
+def optional_user(sonic_session: str | None = Cookie(default=None)) -> dict[str, Any] | None:
+    """Dependency: returns user dict if valid session cookie exists, else None for guest users."""
+    if not sonic_session:
+        return None
+    try:
+        db = get_db()
+        sess = db.sessions.find_one({
+            "token_hash": hashlib.sha256(sonic_session.encode()).hexdigest(),
+            "expires_at": {"$gt": datetime.now(timezone.utc)},
+        })
+        if not sess:
+            return None
+        user = db.users.find_one({"_id": oid(sess["user_id"], "user")})
+        if not user or not user.get("active", True):
+            return None
+        return user
+    except Exception:
+        return None
 
 
 def require_admin(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
@@ -484,7 +516,7 @@ def health():
             db_status = "not_connected"
         return {
             "status": "ok",
-            "model": "loaded" if MODEL_PATH.exists() else "baseline",
+            "model": python_model_status(),
             "database": db_status,
             "databaseEngine": "sqlite",
             "databaseReason": "",
@@ -497,7 +529,7 @@ def health():
         db_status = "not_connected"
     return {
         "status": "ok",
-        "model": "loaded" if MODEL_PATH.exists() else "baseline",
+        "model": python_model_status(),
         "database": db_status,
         "databaseEngine": "mongodb",
         "databaseReason": "" if db_status == "connected" else _DB_STATUS["reason"],
@@ -707,17 +739,17 @@ def sniff_audio_content(content: bytes, suffix: str) -> bool:
     if not content or len(content) < 4:
         return False
     if suffix == ".wav":
-        return content[:4] == b"RIFF" or b"WAVE" in content[:32] or True
+        return content[:4] == b"RIFF" and b"WAVE" in content[:32]
     if suffix == ".mp3":
-        return content[:3] == b"ID3" or content[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"} or b"\xff" in content[:4] or True
+        return content[:3] == b"ID3" or content[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}
     if suffix in {".ogg", ".oga"}:
-        return content[:4] == b"OggS" or True
+        return content[:4] == b"OggS"
     if suffix == ".flac":
-        return content[:4] == b"fLaC" or True
+        return content[:4] == b"fLaC"
     if suffix in {".webm", ".weba"}:
-        return content[:4] == b"\x1a\x45\xdf\xa3" or b"webm" in content[:64] or b"matroska" in content[:64] or True
+        return content[:4] == b"\x1a\x45\xdf\xa3" or b"webm" in content[:64] or b"matroska" in content[:64]
     if suffix in {".m4a", ".mp4", ".aac"}:
-        return b"ftyp" in content[:32] or b"mp4" in content[:32] or True
+        return b"ftyp" in content[:32] or b"mp4" in content[:32]
     return True
 
 
@@ -728,7 +760,7 @@ def sniff_audio_content(content: bytes, suffix: str) -> bool:
 from app.model_evaluator import evaluate_audio
 
 @app.post("/detections/analyze", status_code=201)
-async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), session_id: str = Form(None), user: dict[str, Any] = Depends(current_user)):
+async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), session_id: str = Form(None), user: dict[str, Any] | None = Depends(optional_user)):
     if source not in {"upload", "live"}:
         raise HTTPException(422, "source must be 'upload' or 'live'")
     if not audio.filename:
@@ -747,7 +779,7 @@ async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), s
     path = UPLOAD_DIR / stored
     path.write_bytes(content)
 
-    # Run 3 ML Models Evaluation (Random Forest, SVM, CNN)
+    # Run YAMNet, SVM, and CNN model evaluation
     eval_result = evaluate_audio(path)
 
     label = eval_result["classification"]
@@ -755,15 +787,16 @@ async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), s
     severity = eval_result["severity"]
 
     db = get_db()
+    user_id = str(user["_id"]) if user else "guest"
     item = {
-        "user_id": str(user["_id"]),
+        "user_id": user_id,
         "audio_filename": Path(audio.filename).name,
         "stored_filename": stored,
         "classification": label,
         "confidence": confidence,
         "severity": severity,
         "python_prediction": eval_result["python_prediction"],
-        "teachable_prediction": eval_result["python_prediction"],
+        "teachable_prediction": None,
         "models": eval_result["models"],
         "model_agreement": eval_result["modelAgreement"],
         "audio_quality": eval_result["audioQuality"],
@@ -883,13 +916,13 @@ def create_review(payload: ReviewInput, user: dict[str, Any] = Depends(current_u
 def models(_: dict[str, Any] = Depends(current_user)):
     return [
         {
-            "id": "random-forest",
-            "name": "Random Forest Classifier",
-            "version": "rf-1.0",
-            "type": "sklearn-ensemble",
-            "status": "loaded",
-            "metrics": {"accuracy": 0.9367, "precision": 0.9450, "recall": 0.9225, "f1Score": 0.9309},
-            "datasetSize": 3000,
+            "id": "yamnet-logistic-regression",
+            "name": "YAMNet Embedding Classifier",
+            "version": "yamnet-transfer-1.0",
+            "type": "tensorflow-hub-yamnet + sklearn-logistic-regression",
+            "status": "configured",
+            "metrics": None,
+            "datasetSize": None,
         },
         {
             "id": "svm-pipeline",
@@ -914,7 +947,7 @@ def models(_: dict[str, Any] = Depends(current_user)):
 
 @app.get("/model/status")
 def model_status():
-    return {"status": "loaded" if MODEL_PATH.exists() else "baseline", "metrics": json.loads(MODEL_METADATA_PATH.read_text()) if MODEL_METADATA_PATH.is_file() else {}}
+    return {"status": python_model_status(), "metrics": json.loads(MODEL_METADATA_PATH.read_text()) if MODEL_METADATA_PATH.is_file() else {}}
 
 
 @app.get("/reports/overview")
@@ -1066,7 +1099,7 @@ async def live_analyze(
         "confidence": 0.0 if silent else confidence,
         "severity": "low" if silent else severity,
         "python_prediction": eval_result["python_prediction"],
-        "teachable_prediction": eval_result["python_prediction"],
+        "teachable_prediction": None,
         "models": eval_result["models"],
         "model_agreement": eval_result["modelAgreement"],
         "audio_quality": eval_result["audioQuality"],
@@ -1136,7 +1169,7 @@ def admin_overview(admin: dict[str, Any] = Depends(require_admin)):
         "severityDistribution": severity_dist,
         "classDistribution": class_dist,
         "databaseEngine": "sqlite" if USE_SQLITE else "mongodb",
-        "modelStatus": "loaded" if MODEL_PATH.exists() else "baseline",
+        "modelStatus": python_model_status(),
     }
 
 
@@ -1433,7 +1466,7 @@ def admin_reports(admin: dict[str, Any] = Depends(require_admin)):
         "severityDistribution": severity_dist,
         "classDistribution": class_dist,
         "activity14d": activity,
-        "modelStatus": "loaded" if MODEL_PATH.exists() else "baseline",
+        "modelStatus": python_model_status(),
         "databaseEngine": "sqlite" if USE_SQLITE else "mongodb",
     }
 
@@ -1452,7 +1485,7 @@ def admin_system(admin: dict[str, Any] = Depends(require_admin)):
     return {
         "databaseEngine": "sqlite" if USE_SQLITE else "mongodb",
         "databaseStatus": db_status,
-        "modelStatus": "loaded" if MODEL_PATH.exists() else "baseline",
+        "modelStatus": python_model_status(),
         "uploadDir": str(UPLOAD_DIR),
         "sessionDays": SESSION_DAYS,
         "maxUploadMB": MAX_UPLOAD_BYTES // (1024 * 1024),

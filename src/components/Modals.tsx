@@ -90,11 +90,11 @@ export function DetectionDetailModal({
               <div className="model-box">
                 <div className="model-box-head">
                   <Cpu size={15} />
-                  <span>Random Forest (93.7%)</span>
+                  <span>YAMNet Classifier</span>
                 </div>
-                <strong>{(detection as any).models?.randomForest?.classification || detection.pythonPrediction?.classification || detection.classification || '—'}</strong>
-                <p className="muted">Confidence: {pct((detection as any).models?.randomForest?.confidence ?? detection.confidence)}</p>
-                <small className="engine-tag">Sklearn Ensemble (242 Feats)</small>
+                <strong>{(detection as any).models?.yamnet?.classification || detection.pythonPrediction?.classification || detection.classification || '—'}</strong>
+                <p className="muted">Confidence: {pct((detection as any).models?.yamnet?.confidence ?? detection.confidence)}</p>
+                <small className="engine-tag">YAMNet Embedding + Logistic Regression (1024)</small>
               </div>
 
               <div className="model-box">

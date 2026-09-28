@@ -122,7 +122,7 @@ export function LandingPage({
     { step: '02', title: 'Validation', desc: 'MIME check, container verification, size bounds' },
     { step: '03', title: 'Preprocessing', desc: 'Resampling, mono conversion, silence trimming' },
     { step: '04', title: 'Feature Extraction', desc: 'MFCCs, spectral roll-off, chroma, RMS energy' },
-    { step: '05', title: 'AI Classification', desc: 'Random Forest, SVM, MLP & Teachable Machine' },
+    { step: '05', title: 'AI Classification', desc: 'YAMNet, SVM, CNN & Teachable Machine' },
     { step: '06', title: 'Confidence Scoring', desc: 'Calibrated probability distribution metrics' },
     { step: '07', title: 'Critical Event Rules', desc: 'Threat severity classification (Low to Critical)' },
     { step: '08', title: 'Real-Time Alert', desc: 'Push notifications & audio telemetry dispatch' },
@@ -398,7 +398,7 @@ export function LandingPage({
               <div className="arch-icon"><Terminal size={18} /></div>
               <div>
                 <b>Python ML Engine</b>
-                <p>Librosa feature extraction pipeline driving an ensemble of Random Forest and Support Vector Machine classifiers.</p>
+                <p>Librosa feature extraction pipeline driving a YAMNet embedding classifier alongside SVM and CNN classifiers.</p>
               </div>
             </div>
 

@@ -12,3 +12,5 @@ soundfile
 h5py
 joblib
 scikit-learn
+tensorflow-hub
+tensorflow==2.20.0

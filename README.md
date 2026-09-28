@@ -52,7 +52,7 @@ SonicSentinel AI is a **Final Year AI/ML Project** built for the **Aptech TechWi
 
 | # | Model | Type | Accuracy | Input | Location |
 |---|-------|------|:--------:|-------|----------|
-| 1 | **Random Forest Classifier** | Sklearn RF | **93.67%** | 242 acoustic tabular features | `ml-service/models/python_model/random_forest_model.pkl` |
+| 1 | **YAMNet Embedding Classifier** | YAMNet + Logistic Regression | Not yet re-evaluated | 1024-D YAMNet embeddings | `ml-service/models/python_model/sonicsentinel_yamnet_model.pkl` |
 | 2 | **SVM Pipeline** | StandardScaler + SVC (RBF, C=10) | **91.63%** | 242 acoustic tabular features | `ml-service/models/python_model/svm_model.pkl` |
 | 3 | **2D CNN** | Keras Conv2D (3 blocks) | **90.99%** | 128×216 Mel Spectrogram | `ml-service/models/python_model/cnn_model.keras` |
 
@@ -100,7 +100,7 @@ FastAPI Backend (Python 3.11)
                     │
                     ▼
          3-Model Python ML Engine
-         ├── Random Forest (random_forest_model.pkl)
+         ├── YAMNet Embedding Classifier (sonicsentinel_yamnet_model.pkl)
          ├── SVM Pipeline  (svm_model.pkl)
          └── 2D CNN        (cnn_model.keras — NumPy forward pass)
                     │
@@ -251,7 +251,7 @@ SonicSentinel AI/
 │   │   ├── create_admin.py       ← Admin creation CLI
 │   │   └── sqlite_db.py          ← SQLite DB layer
 │   └── models/python_model/
-│       ├── random_forest_model.pkl
+│       ├── sonicsentinel_yamnet_model.pkl
 │       ├── svm_model.pkl
 │       ├── cnn_model.keras
 │       └── class_labels.json
