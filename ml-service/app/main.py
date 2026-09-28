@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import urlencode
 import requests
@@ -59,6 +59,23 @@ FACEBOOK_REDIRECT_URI = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:800
 ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "60"))
 
 app = FastAPI(title="SonicSentinel API", version="1.2.0")
+
+
+@app.middleware("http")
+async def _api_prefix_compat(request: Request, call_next):
+    """Mirror the dev Vite proxy in production.
+
+    The built SPA (served by this same backend on Railway) calls every
+    non-admin API through "/api/..."; in dev the Vite proxy strips that
+    prefix. Without it the deployed app's requests would 404, because the
+    user routes live at "/auth/...", "/detections/...", etc. while admin
+    routes are natively prefixed "/api/admin/...". Strip "/api" for
+    everything except "/api/admin/..." so one frontend works everywhere.
+    """
+    path = request.scope.get("path", "")
+    if path.startswith("/api/") and not path.startswith("/api/admin"):
+        request.scope["path"] = path[len("/api"):] or "/"
+    return await call_next(request)
 
 
 def python_model_status() -> str:
@@ -507,6 +524,13 @@ class ReviewInput(BaseModel):
 
 @app.get("/health")
 def health():
+    # The first YAMNet inference on a fresh process takes a minute or two. The
+    # UI reads this so it can say "warming up" rather than look broken.
+    try:
+        from app import warmup as _warmup
+        warm_state = _warmup.snapshot()
+    except Exception as exc:
+        warm_state = {"status": "unknown", "error": f"{type(exc).__name__}: {exc}"}
     if USE_SQLITE:
         try:
             db = get_db()
@@ -517,6 +541,7 @@ def health():
         return {
             "status": "ok",
             "model": python_model_status(),
+            "modelWarmup": warm_state,
             "database": db_status,
             "databaseEngine": "sqlite",
             "databaseReason": "",
@@ -530,6 +555,7 @@ def health():
     return {
         "status": "ok",
         "model": python_model_status(),
+        "modelWarmup": warm_state,
         "database": db_status,
         "databaseEngine": "mongodb",
         "databaseReason": "" if db_status == "connected" else _DB_STATUS["reason"],
@@ -646,6 +672,7 @@ def detection_out(item: dict[str, Any], audio=False):
         "pythonPrediction": item.get("python_prediction", {}),
         "teachableMachinePrediction": item.get("teachable_prediction", {}),
         "models": item.get("models", {}),
+        "modelBreakdown": item.get("model_breakdown", {}),
         "modelAgreement": item.get("model_agreement", "agree"),
         "audioQuality": item.get("audio_quality", {}),
         "status": item["status"],
@@ -759,6 +786,42 @@ def sniff_audio_content(content: bytes, suffix: str) -> bool:
 
 from app.model_evaluator import evaluate_audio
 
+
+def live_model_breakdown(eval_result: dict[str, Any]) -> dict[str, Any]:
+    """Per-model results for the live panel, straight from what actually ran.
+
+    Each entry is either a real classification or an explicit unavailable
+    status with a reason. Nothing is filled in on a model's behalf, and the
+    Teachable Machine model is never listed here because it runs in the browser
+    against its own label set.
+    """
+    models = eval_result.get("models") or {}
+    out: dict[str, Any] = {}
+
+    for key in ("yamnet", "svm", "cnn"):
+        m = models.get(key) or {}
+        ran = m.get("status", "evaluated") == "evaluated" and m.get("classification")
+        out[key] = {
+            "name": m.get("name", key),
+            "status": "evaluated" if ran else "not_evaluated",
+            "classification": m.get("classification") if ran else None,
+            "confidence": float(m.get("confidence") or 0.0) if ran else 0.0,
+            "reason": None if ran else m.get("reason", "no result reported"),
+        }
+        for extra in ("accuracy", "embeddingDimensions"):
+            if extra in m:
+                out[key][extra] = m[extra]
+
+    out["teachable_machine"] = {
+        "name": "Teachable Machine (Speech Commands)",
+        "status": "browser_side",
+        "classification": None,
+        "confidence": 0.0,
+        "reason": "runs client-side in this browser; its audio never reaches the backend",
+    }
+    return out
+
+
 @app.post("/detections/analyze", status_code=201)
 async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), session_id: str = Form(None), user: dict[str, Any] | None = Depends(optional_user)):
     if source not in {"upload", "live"}:
@@ -781,6 +844,16 @@ async def analyze(audio: UploadFile = File(...), source: str = Form("upload"), s
 
     # Run YAMNet, SVM, and CNN model evaluation
     eval_result = evaluate_audio(path)
+
+    if eval_result.get("undecodable"):
+        # A file can pass the magic-byte sniff and still be undecodable (a
+        # truncated or non-Opus WebM, for example). Reject it instead of
+        # storing a confident-looking result derived from silence.
+        path.unlink(missing_ok=True)
+        raise HTTPException(
+            415,
+            f"The backend could not decode this audio: {eval_result.get('undecodableReason')}",
+        )
 
     label = eval_result["classification"]
     confidence = eval_result["confidence"]
@@ -1085,10 +1158,23 @@ async def live_analyze(
 
     eval_result = evaluate_audio(path)
 
+    if eval_result.get("undecodable"):
+        # The container looked like audio but no decoder could read it. Say so
+        # instead of storing a null detection that looks like a real result.
+        path.unlink(missing_ok=True)
+        raise HTTPException(
+            415,
+            f"The backend could not decode this audio: {eval_result.get('undecodableReason')}",
+        )
+
     label = eval_result["classification"]
     confidence = eval_result["confidence"]
     severity = eval_result["severity"]
-    silent = confidence < 0.10 or label == "Background Noise"
+    # A window is only "no event" when a model actually ran and was unsure, or
+    # when the audio was genuinely below the silence floor. A hard confidence
+    # cut-off is no longer used to invent a result from a failed decode.
+    silent = bool(eval_result.get("silent")) or confidence < 0.10
+    breakdown = live_model_breakdown(eval_result)
 
     db = get_db()
     item = {
@@ -1101,6 +1187,7 @@ async def live_analyze(
         "python_prediction": eval_result["python_prediction"],
         "teachable_prediction": None,
         "models": eval_result["models"],
+        "model_breakdown": breakdown,
         "model_agreement": eval_result["modelAgreement"],
         "audio_quality": eval_result["audioQuality"],
         "status": "complete" if silent else ("pending_review" if confidence < .75 or severity in {"high", "critical"} else "complete"),
@@ -1539,9 +1626,12 @@ if DIST_DIR.exists() and (DIST_DIR / "index.html").is_file():
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         # Allow API / Auth / Model endpoints to pass through
-        if full_path.startswith(("api/", "auth/", "detections/", "live/", "models/", "tm-model/", "reports/", "reviews/", "health")):
+        if full_path.startswith(("api/", "auth/", "detections/", "live/", "models/", "v1/", "tm-model/", "reports/", "reviews/", "health")):
             raise HTTPException(404, f"API endpoint not found: /{full_path}")
         file_path = DIST_DIR / full_path
-        if file_path.is_file():
+        if full_path and file_path.is_file():
             return FileResponse(file_path)
-        return FileResponse(DIST_DIR / "index.html")
+        index_file = DIST_DIR / "index.html"
+        if not index_file.is_file():
+            raise HTTPException(404, "SPA not built; serve the frontend separately")
+        return FileResponse(index_file)

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<!--
+  Overflow probe. Reports every element whose right edge exceeds the viewport,
+  so horizontal scroll at narrow widths can be traced to a specific node
+  instead of guessed at. Not part of the site.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overflow probe — SonicSentinel AI docs</title>
+<style>
+  body { font: 13px ui-monospace, Consolas, monospace; background: #0A0F1C; color: #E6EDF7; margin: 0; padding: 20px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 18px; color: #8494AC; font-size: 12px; }
+  table { border-collapse: collapse; margin-bottom: 22px; }
+  caption { text-align: left; color: #F5A524; font-size: 12px; padding: 6px 0; }
+  th, td { border: 1px solid #22304A; padding: 4px 8px; text-align: left; font-size: 12px; }
+  th { color: #8494AC; font-weight: 500; }
+  td.bad { color: #FF5470; }
+  .frame { position: absolute; left: -99999px; top: 0; border: 0; }
+</style>
+</head>
+<body>
+<h1>Overflow probe</h1>
+<p class="sub">Lists elements extending past the viewport right edge at each width.</p>
+<div id="out">measuring…</div>
+
+<script>
+const WIDTHS = [1440, 1280, 1080, 1024, 900, 768, 600, 480, 420, 360];
+
+function probe(w) {
+  return new Promise(resolve => {
+    const f = document.createElement("iframe");
+    f.className = "frame";
+    f.width = w; f.height = 900; f.src = "../index.html";
+    f.onload = () => {
+      const d = f.contentDocument, win = f.contentWindow;
+      const vw = win.innerWidth;
+      const offenders = [];
+      const seen = new Set();
+      d.querySelectorAll("main *").forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return;
+        if (r.right > vw + 1) {
+          const key = el.tagName + "." + (el.className || "").split(" ")[0];
+          if (seen.has(key)) return;
+          seen.add(key);
+          offenders.push({
+            sel: key,
+            right: Math.round(r.right),
+            w: Math.round(r.width),
+            text: (el.textContent || "").trim().slice(0, 44)
+          });
+        }
+      });
+      // also the document itself
+      resolve({
+        w, vw,
+        scrollW: d.documentElement.scrollWidth,
+        overflow: d.documentElement.scrollWidth > vw,
+        offenders
+      });
+      f.remove();
+    };
+    document.body.appendChild(f);
+  });
+}
+
+(async () => {
+  const rows = [];
+  for (const w of WIDTHS) rows.push(await probe(w));
+  let html = "";
+  for (const r of rows) {
+    html += `<table><caption>${r.w}px — doc ${r.scrollW} / vp ${r.vw} — ${r.overflow ? "OVERFLOW" : "ok"} (${r.offenders.length})</caption>`;
+    html += "<tr><th>element</th><th>right</th><th>width</th><th>text</th></tr>";
+    if (!r.offenders.length) html += `<tr><td colspan="4">none</td></tr>`;
+    for (const o of r.offenders) {
+      html += `<tr><td class="bad">${o.sel}</td><td>${o.right}</td><td>${o.w}</td><td>${o.text.replace(/[<>&]/g, "")}</td></tr>`;
+    }
+    html += "</table>";
+  }
+  document.getElementById("out").innerHTML = html;
+  window.__ovf = rows;
+})();
+</script>
+</body>
+</html>

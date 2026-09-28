@@ -10,6 +10,9 @@ build/
 out/
 *.tsbuildinfo
 
+# Local training data (3 GB raw audio) -- too large for GitHub; keep on disk
+dataset/
+
 # Environment / secrets -- NEVER commit these
 .env
 .env.*

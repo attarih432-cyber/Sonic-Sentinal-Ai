@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion, useScroll, useTransform } from 'framer-motion';
+import { motion, useScroll, useTransform } from 'framer-motion';
 import { 
   ShieldCheck, Activity, ChevronDown, ArrowRight, Radio, Mic, 
   Sparkles, LineChart, BellRing, Cpu, Volume2, Database, Sliders,
@@ -212,30 +212,27 @@ export function LandingPage({
           {/* Right Column: Embedded Glass Auth Card or Hero Showcase */}
           <div className="hero-right-col">
             <div className="auth-card-sticky-wrapper">
-              <AnimatePresence mode="wait">
-                {inlineAuthMode ? (
-                  <motion.div
-                    key="auth-card-view"
-                    initial={{ opacity: 0, y: 14, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -14, scale: 0.98 }}
-                    transition={{ duration: 0.22 }}
-                  >
-                    <AuthCard 
-                      key={inlineAuthMode}
-                      initialMode={inlineAuthMode}
-                      onCancel={() => setInlineAuthMode(null)}
-                    />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="hero-showcase-view"
-                    initial={{ opacity: 0, y: 14, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -14, scale: 0.98 }}
-                    transition={{ duration: 0.22 }}
-                    className="hero-preview-showcase"
-                  >
+              {inlineAuthMode ? (
+                <motion.div
+                  key="auth-card-view"
+                  initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.22 }}
+                >
+                  <AuthCard 
+                    key={inlineAuthMode}
+                    initialMode={inlineAuthMode}
+                    onCancel={() => setInlineAuthMode(null)}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="hero-showcase-view"
+                  initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.22 }}
+                  className="hero-preview-showcase"
+                >
                     <div className="showcase-top-row">
                       <div className="showcase-brand">
                         <span className="pulse-dot" />
@@ -312,7 +309,6 @@ export function LandingPage({
                     </p>
                   </motion.div>
                 )}
-              </AnimatePresence>
             </div>
           </div>
 

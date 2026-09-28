@@ -40,6 +40,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // The Teachable Machine graph is served by the backend, not from
+      // public/. Without this the browser-side model cannot load in dev.
+      '/tm-model': {
+        target: process.env.ML_SERVICE_URL || 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 });

@@ -307,17 +307,23 @@ function UserApp({
 
         {/* Viewport Content */}
         <div className="app-main-content">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={page}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-            >
-              {renderCurrentView()}
-            </motion.div>
-          </AnimatePresence>
+          {/*
+            No AnimatePresence here on purpose. With mode="wait" the incoming
+            page is not mounted until the outgoing one has finished its exit,
+            and an exit only finishes while requestAnimationFrame is running.
+            In a hidden or throttled tab rAF does not run, so navigation
+            silently froze on the previous page. Rendering the keyed motion
+            div directly makes the swap immediate and leaves the fade as pure
+            decoration that can never block the view.
+          */}
+          <motion.div
+            key={page}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {renderCurrentView()}
+          </motion.div>
         </div>
       </div>
 

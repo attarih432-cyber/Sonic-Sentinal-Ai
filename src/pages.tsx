@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api } from './api/client';
 import { authApi, type User } from './api/auth';
+import { useAuth } from './auth/AuthContext';
 import { detectionsApi, type Detection as ApiDetection } from './api/detections';
 import { reportsApi, type ActivityPoint } from './api/reports';
 import { LiveMonitorPage } from './live';
@@ -51,17 +52,23 @@ export const nav: { name: Page; icon: React.ElementType }[] = [
 ];
 
 /* ---------- Types & Utilities ---------- */
+export type DetectionSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+/** Normalised detection: the API leaves these three optional, the UI needs them. */
 export interface Detection extends Omit<ApiDetection, 'classification' | 'confidence' | 'severity'> {
   classification: string;
   confidence: number;
-  severity: string;
+  severity: DetectionSeverity;
 }
+
+export const toDetectionSeverity = (v: unknown): DetectionSeverity =>
+  v === 'critical' || v === 'high' || v === 'medium' ? v : 'low';
 
 export const norm = (d: ApiDetection): Detection => ({
   ...d,
   classification: d.classification ?? 'Unknown',
   confidence: d.confidence ?? 0,
-  severity: d.severity ?? 'low'
+  severity: toDetectionSeverity(d.severity)
 });
 
 export const confPct = (v: unknown): number => {
@@ -161,6 +168,7 @@ interface OverviewStats {
 }
 
 export function Overview({ onNavigate }: { onNavigate?: (page: Page) => void }) {
+  const { user } = useAuth();
   const [stats, setStats] = useState<OverviewStats>({ totalAnalyses: 0, criticalEvents: 0, averageConfidence: 0, pendingReviews: 0 });
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
@@ -295,7 +303,7 @@ export function Overview({ onNavigate }: { onNavigate?: (page: Page) => void }) 
       {/* Welcome Banner */}
       <section className="dash-welcome-banner">
         <div>
-          <h2>Welcome back, Admin!</h2>
+          <h2>Welcome back, {user?.role === 'admin' ? 'Admin' : (user?.name || 'there')}!</h2>
           <p className="muted">Here&apos;s what&apos;s happening with your audio monitoring system.</p>
         </div>
         <div className="welcome-pills">
@@ -537,7 +545,7 @@ export function Overview({ onNavigate }: { onNavigate?: (page: Page) => void }) 
                                 audioFilename: a.filename,
                                 classification: a.classification,
                                 confidence: a.confidence,
-                                severity: a.severity as any,
+                                severity: toDetectionSeverity(a.severity),
                                 status: a.resolved ? 'reviewed' : 'pending_review',
                                 createdAt: a.createdAt
                               });

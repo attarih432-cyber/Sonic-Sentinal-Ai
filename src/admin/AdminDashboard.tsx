@@ -120,7 +120,7 @@ function StatCard({ label, value, icon: Icon, color, sub }: {
 // ============================================================
 // OVERVIEW PAGE
 // ============================================================
-function AdminOverview() {
+function AdminOverview({ user }: { user: UserType }) {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -153,8 +153,8 @@ function AdminOverview() {
   return (
     <div className="admin-page-content">
       <div className="admin-page-header">
-        <h2>Platform Overview</h2>
-        <p className="muted">Real-time SonicSentinel platform statistics</p>
+        <h2>Welcome back, {user?.role === 'admin' ? 'Admin' : user?.name || 'there'}!</h2>
+        <p className="muted">Platform overview — real-time SonicSentinel statistics across all users</p>
       </div>
 
       {/* KPI Grid */}
@@ -991,7 +991,7 @@ export function AdminDashboard({
 
   const renderPage = () => {
     switch (page) {
-      case 'Overview': return <AdminOverview />;
+      case 'Overview': return <AdminOverview user={user} />;
       case 'Users': return <AdminUsers />;
       case 'Detections': return <AdminDetections />;
       case 'Alerts': return <AdminAlerts />;
@@ -1000,7 +1000,7 @@ export function AdminDashboard({
       case 'Logs': return <AdminLogs />;
       case 'System': return <AdminSystem />;
       case 'Settings': return <AdminSettings adminUser={user} onLogout={onLogout} />;
-      default: return <AdminOverview />;
+      default: return <AdminOverview user={user} />;
     }
   };
 

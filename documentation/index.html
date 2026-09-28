@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SonicSentinel AI — Project Documentation</title>
+<meta name="description" content="Verified project documentation for SonicSentinel AI, an acoustic event classification platform. Built from executed tests and measured data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   SonicSentinel AI — documentation surface
+
+   Concept: instrument readout. The project is measurement equipment, so the
+   page behaves like a console: a fixed channel-strip rail, one measured
+   column of text, and a colour scale that carries the product's own
+   severity semantics rather than decorative hues.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --ink:      #0A0F1C;   /* spectrogram floor */
+  --panel:    #111B2E;
+  --panel-2:  #16223A;
+  --rule:     #22304A;
+  --rule-hi:  #2E4062;
+  --signal:   #38E8C6;   /* the trace */
+  --warn:     #F5A524;
+  --crit:     #FF5470;
+  --text:     #E6EDF7;
+  --muted:    #8494AC;
+  --faint:    #5C6B84;
+
+  --sans:  "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp:  "Bricolage Grotesque", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono:  "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+  /* Two columns, deliberately. Text gets a reading measure; data gets a
+     wider bay so plots stay legible. The bay is framed so the overhang
+     reads as intent rather than as overflow. */
+  --measure: 66ch;
+  --bay: 1000px;
+  --hang: 2.9rem;     /* section numerals hang outside the text column */
+  --rail: 240px;
+  --gap: 3.4rem;
+  --ease: cubic-bezier(.2,.7,.3,1);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 2.5rem; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numerals are instrument readouts. Monospace is scoped to them, never
+   used as a decorative label face. */
+.num, code, kbd, samp { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+code {
+  font-size: .875em;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: .1em .38em;
+  color: var(--signal);
+  /* Break only when a token genuinely cannot fit. Never nowrap here: a long
+     path or filename would otherwise set a min-content floor wider than the
+     viewport and force horizontal scroll. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+a { color: var(--signal); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--signal) 34%, transparent); }
+a:hover { border-bottom-color: var(--signal); }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 2px; }
+
+/* ── channel-strip rail ───────────────────────────────────────────────── */
+.rail {
+  position: fixed; inset: 0 auto 0 0; width: var(--rail);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--ink) 100%);
+  border-right: 1px solid var(--rule);
+  padding: 1.9rem 1.15rem;
+  display: flex; flex-direction: column; gap: 1.7rem;
+  overflow-y: auto; z-index: 20;
+}
+.mark { display: flex; align-items: baseline; gap: .5rem; }
+.mark b {
+  font-family: var(--disp); font-size: 1.06rem; font-weight: 700;
+  letter-spacing: -.015em; color: var(--text);
+}
+.mark span { font-family: var(--mono); font-size: .66rem; color: var(--faint); }
+.mark-sub {
+  font-size: .705rem; color: var(--muted); line-height: 1.45;
+  margin-top: .4rem; letter-spacing: .005em;
+}
+
+.rail nav { display: flex; flex-direction: column; gap: .1rem; }
+.rail nav a {
+  font-size: .845rem; color: var(--muted); padding: .34rem .55rem;
+  border: 0; border-left: 2px solid transparent; border-radius: 0 3px 3px 0;
+  display: flex; align-items: baseline; gap: .55rem;
+  transition: color .16s var(--ease), border-color .16s var(--ease), background .16s var(--ease);
+}
+.rail nav a i {
+  font-style: normal; font-family: var(--mono); font-size: .66rem;
+  color: var(--faint); min-width: 1.1em;
+}
+.rail nav a:hover { color: var(--text); background: var(--panel-2); }
+.rail nav a[aria-current="true"] {
+  color: var(--signal); border-left-color: var(--signal); background: var(--panel-2);
+}
+.rail nav a[aria-current="true"] i { color: var(--signal); }
+
+.rail-foot { margin-top: auto; font-size: .68rem; color: var(--faint); line-height: 1.5; }
+.rail-foot div { display: flex; justify-content: space-between; gap: .5rem; padding: .16rem 0; }
+.rail-foot span:last-child { font-family: var(--mono); color: var(--muted); }
+
+.rail-toggle {
+  display: none; position: fixed; top: .8rem; left: .8rem; z-index: 30;
+  background: var(--panel); border: 1px solid var(--rule); color: var(--text);
+  border-radius: 4px; padding: .5rem .7rem; font-family: var(--mono); font-size: .72rem;
+  cursor: pointer;
+}
+
+/* ── content column ───────────────────────────────────────────────────── */
+/* One column, left-aligned. Every direct child of <main> is a section or the
+   hero; each is capped at the data bay, and text elements inside then narrow
+   themselves back to the reading measure. */
+main { margin-left: var(--rail); padding: 3.2rem var(--gap) 7rem; }
+main > * { max-width: var(--bay); }
+
+section { margin-bottom: 4.4rem; scroll-margin-top: 2rem; }
+
+h1, h2, h3 {
+  font-family: var(--disp);
+  font-weight: 700;
+  letter-spacing: -.022em;
+  line-height: 1.14;
+  margin: 0 0 .85rem;
+}
+h1 { font-size: clamp(2.6rem, 5.6vw, 3.85rem); letter-spacing: -.034em; line-height: 1.02; }
+h2 { font-size: 1.66rem; margin-top: 0; }
+h3 { font-size: 1.1rem; letter-spacing: -.012em; margin-top: 2.2rem; }
+
+/* Every text run is held to the reading measure, wherever it sits. */
+main p, main ul, main ol, main .lede, main .note, main .sec-note,
+main .bay-note, main .mark-sub, footer p {
+  max-width: var(--measure);
+}
+main li, main td { max-width: 46ch; }
+
+.lede {
+  font-size: 1.075rem; color: var(--muted); line-height: 1.58;
+  max-width: 60ch; margin: 0 0 1.5rem;
+}
+
+p { margin: 0 0 1.05rem; max-width: var(--measure); }
+strong { color: var(--text); font-weight: 600; }
+em { color: var(--signal); font-style: normal; }
+
+ul, ol { margin: 0 0 1.05rem; padding-left: 1.25rem; max-width: var(--measure); }
+li { margin-bottom: .42rem; }
+li::marker { color: var(--faint); }
+
+hr {
+  border: 0; height: 1px; margin: 2.6rem 0;
+  background: linear-gradient(90deg, var(--rule-hi) 0%, var(--rule) 22%, transparent 78%);
+}
+
+/* Section numbering is a real index, not decoration. The numeral hangs
+   outside the text column so the heading stays flush with its own body. */
+.sec-head {
+  display: grid; grid-template-columns: var(--hang) 1fr; align-items: baseline;
+  margin: 0 0 .3rem calc(-1 * var(--hang));
+}
+.sec-head i {
+  font-style: normal; font-family: var(--mono); font-size: .74rem;
+  color: var(--signal); letter-spacing: .04em;
+}
+.sec-head h2 { margin: 0; }
+.sec-note {
+  font-size: .78rem; color: var(--faint); margin: 0 0 1.7rem;
+  padding-bottom: .85rem; border-bottom: 1px solid var(--rule);
+}
+
+/* ── hero ─────────────────────────────────────────────────────────────── */
+.hero { margin: 0 0 4.2rem; }
+.hero .lede { max-width: 56ch; }
+.hero-meta {
+  display: flex; flex-wrap: wrap; gap: 0 2.1rem; margin-top: 1.4rem;
+  font-size: .765rem; color: var(--faint);
+}
+.hero-meta div { display: flex; gap: .5rem; }
+.hero-meta span:last-child { font-family: var(--mono); color: var(--muted); }
+
+/* ── figure / instrument bay ───────────────────────────────────────────
+   Data panels run wider than the text column. Framing them with a label
+   bar makes that overhang legible as a deliberate bay. */
+.bay {
+  margin: 2.2rem 0;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--ink);
+  overflow: hidden;
+}
+.bay-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: .55rem .85rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono); font-size: .655rem; font-weight: 500;
+  letter-spacing: .055em; color: var(--faint);
+}
+.bay-bar b { color: var(--signal); font-weight: 500; }
+.bay-bar span { color: var(--muted); }
+.bay canvas, .bay img { display: block; width: 100%; height: auto; }
+.bay-note {
+  font-size: .755rem; color: var(--faint); line-height: 1.58;
+  padding: .75rem .85rem; border-top: 1px solid var(--rule);
+  background: var(--panel);
+}
+.bay-note b { font-family: var(--mono); font-weight: 500; color: var(--muted); margin-right: .45rem; }
+
+/* ── status table ─────────────────────────────────────────────────────── */
+.status {
+  width: 100%; border-collapse: collapse; margin: 1.6rem 0;
+  font-size: .855rem; table-layout: fixed;
+}
+.status caption {
+  text-align: left; font-size: .755rem; color: var(--faint);
+  padding-bottom: .75rem; border-bottom: 1px solid var(--rule);
+  caption-side: top;
+}
+.status th {
+  text-align: left; font-weight: 500; font-size: .68rem; color: var(--faint);
+  letter-spacing: .04em; text-transform: uppercase;
+  padding: 0 1.1rem .6rem 0; border-bottom: 1px solid var(--rule-hi);
+  vertical-align: bottom;
+}
+.status th:last-child, .status td:last-child { padding-right: 0; }
+.status td {
+  padding: .68rem 1.1rem .68rem 0; border-bottom: 1px solid var(--rule);
+  vertical-align: top; color: var(--muted);
+  overflow-wrap: break-word; min-width: 0;
+}
+.status tbody tr:last-child td { border-bottom: 0; }
+.status td:first-child { color: var(--text); font-weight: 500; }
+.status td.id { font-family: var(--mono); font-size: .74rem; color: var(--faint); font-weight: 400; }
+/* Numerals are held in the readout face, but not nowrap: a value like
+   "16 / 24 / 32 / 44.1 / 48 kHz" must be free to wrap on a phone. */
+.status td.n, .status td.num, .status th.num {
+  font-family: var(--mono); text-align: right; overflow-wrap: break-word;
+}
+.status td.c  { font-family: var(--mono); font-size: .8rem; }
+
+/* Column proportions. The label column is stable so rows align down the
+   page; the wide trailing column carries the data. */
+.status col.l { width: 20%; }
+.status col.m { width: 40%; }
+.status col.r { width: 40%; }
+
+@media (hover: hover) {
+  .status tbody tr:hover td { background: var(--panel); }
+}
+
+/* The verdict word is the structural element. Colour reinforces it, never
+   replaces it, so the table still reads in monochrome. */
+.v {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .04em;
+  text-transform: uppercase; white-space: nowrap;
+  display: inline-block; padding: .12rem .42rem; border-radius: 2px;
+  border: 1px solid currentColor;
+}
+.v-pass { color: var(--signal); }
+.v-fail { color: var(--crit); }
+.v-warn { color: var(--warn); }
+.v-open { color: var(--faint); }
+
+/* ── callouts ─────────────────────────────────────────────────────────── */
+.note {
+  border: 1px solid var(--rule); border-left-width: 2px;
+  background: var(--panel);
+  padding: 1.05rem 1.25rem; margin: 1.8rem 0; border-radius: 0 4px 4px 0;
+}
+.note > :last-child { margin-bottom: 0; }
+.note p { font-size: .895rem; }
+.note-h {
+  font-family: var(--mono); font-size: .675rem; letter-spacing: .06em;
+  text-transform: uppercase; font-weight: 500;
+  margin: 0 0 .6rem; display: flex; align-items: center; gap: .5rem;
+}
+.note-h::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+.note.crit  { border-left-color: var(--crit); }
+.note.crit .note-h  { color: var(--crit); }
+.note.warn  { border-left-color: var(--warn); }
+.note.warn .note-h  { color: var(--warn); }
+.note.info  { border-left-color: var(--signal); }
+.note.info .note-h  { color: var(--signal); }
+
+/* ── class taxonomy ───────────────────────────────────────────────────── */
+.classes { margin: 1.8rem 0; max-width: 30rem; }
+.cls-row {
+  display: grid; grid-template-columns: 1.8rem 1fr auto;
+  gap: .9rem; align-items: center;
+  padding: .58rem 0; border-bottom: 1px solid var(--rule);
+}
+.cls-row:last-child { border-bottom: 0; }
+.cls-row i {
+  font-style: normal; font-family: var(--mono); font-size: .7rem;
+  color: var(--faint);
+}
+.cls-row b { font-weight: 500; font-size: .93rem; }
+.sev {
+  font-family: var(--mono); font-size: .645rem; letter-spacing: .06em;
+  text-transform: uppercase; padding: .16rem .46rem; border-radius: 2px;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.sev-critical { color: var(--crit); }
+.sev-high     { color: var(--warn); }
+.sev-medium   { color: var(--text); }
+.sev-low      { color: var(--faint); }
+
+/* ── code block ───────────────────────────────────────────────────────── */
+pre {
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 1rem 1.15rem; overflow-x: auto; margin: 1.5rem 0;
+  max-width: 78ch;
+  font-family: var(--mono); font-size: .775rem; line-height: 1.66;
+  color: var(--text); tab-size: 2;
+}
+pre code { background: 0; border: 0; padding: 0; color: inherit; font-size: inherit; }
+pre .c { color: var(--faint); }
+pre .k { color: var(--crit); }
+pre .s { color: var(--signal); }
+
+footer {
+  border-top: 1px solid var(--rule); margin-top: 5rem; padding-top: 1.6rem;
+  font-size: .76rem; color: var(--faint); max-width: var(--measure);
+}
+footer p { margin: 0 0 .4rem; }
+
+/* ── responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+  :root { --gap: 2.4rem; }
+}
+@media (max-width: 1080px) {
+  .rail-toggle { display: block; }
+  .rail {
+    transform: translateX(-100%);
+    transition: transform .22s var(--ease);
+    box-shadow: 0 0 40px rgba(0,0,0,.5);
+  }
+  body.nav-open .rail { transform: none; }
+  main { margin-left: 0; padding: 4.4rem var(--gap) 5rem; }
+  /* No gutter to hang into, so the numeral tightens up against the heading
+     and right-aligns as a hanging figure. */
+  :root { --hang: 2.1rem; }
+  .sec-head { margin-left: 0; }
+  .sec-head i { text-align: right; }
+}
+@media (max-width: 720px) {
+  :root { --gap: 1.5rem; }
+  body { font-size: 15.75px; }
+  main { padding: 4rem var(--gap) 4rem; }
+  .status { font-size: .8rem; table-layout: auto; }
+  .status th, .status td { padding-right: .6rem; }
+  main li, main td { max-width: none; }
+  pre { max-width: none; font-size: .72rem; }
+  .cls-row { grid-template-columns: 1.5rem 1fr; row-gap: .35rem; }
+  .cls-row .sev { grid-column: 2; justify-self: start; }
+  .bay-bar { font-size: .6rem; letter-spacing: .04em; }
+  .bay-bar span { display: none; }
+}
+
+/* ── print ────────────────────────────────────────────────────────────── */
+@media print {
+  :root { --ink: #fff; --panel: #fff; --panel-2: #fff; --text: #000; --muted: #333; --faint: #666; --rule: #ccc; --rule-hi: #999; --signal: #046; --warn: #a60; --crit: #b00; --bay: 100%; --measure: 100%; }
+  body { background: #fff; font-size: 10pt; }
+  .rail, .rail-toggle { display: none !important; }
+  main { margin: 0; padding: 0; }
+  main > * { max-width: 100%; }
+  main p, main li, main td, main .note, main .lede, pre { max-width: 100%; }
+  section { break-inside: avoid; margin-bottom: 1.5rem; }
+  h1, h2, h3 { break-after: avoid; }
+  figure, .bay, .note, .status, pre { break-inside: avoid; }
+  .bay, .note, pre, .status th { background: transparent; }
+  .bay-bar, .bay-note { background: transparent; }
+  .sec-head { margin-left: 0; }
+  a { border: 0; color: #000; }
+  h1 { font-size: 24pt; }
+  h2 { font-size: 14pt; }
+  h3 { font-size: 11pt; margin-top: 1.2rem; }
+  .status { font-size: 8.5pt; }
+}
+</style>
+</head>
+<body>
+
+<button class="rail-toggle" id="railToggle" aria-expanded="false" aria-controls="rail">menu</button>
+
+<aside class="rail" id="rail">
+  <div>
+    <div class="mark"><b>SonicSentinel AI</b><span>v0.1</span></div>
+    <p class="mark-sub">Acoustic event classification.<br>Documentation built from executed tests.</p>
+  </div>
+
+  <nav aria-label="Sections">
+    <a href="#read"><i>00</i>Read first</a>
+    <a href="#verified"><i>01</i>What was verified</a>
+    <a href="#models"><i>02</i>The two models</a>
+    <a href="#ensemble"><i>03</i>The ensemble</a>
+    <a href="#severity"><i>04</i>Severity ladder</a>
+    <a href="#dataset"><i>05</i>Dataset state</a>
+    <a href="#findings"><i>06</i>Findings</a>
+    <a href="#evidence"><i>07</i>Graph evidence</a>
+    <a href="#fixes"><i>08</i>Fix list</a>
+    <a href="#reference"><i>09</i>Reference</a>
+  </nav>
+
+  <div class="rail-foot">
+    <div><span>tests</span><span>12/12</span></div>
+    <div><span>endpoints</span><span>40</span></div>
+    <div><span>classes</span><span>10</span></div>
+    <div><span>build</span><span style="color:var(--crit)">4 errors</span></div>
+  </div>
+</aside>
+
+<main>
+
+<!-- ══ HERO ══════════════════════════════════════════════════════════ -->
+<header class="hero">
+  <h1>Listen,<br>classify,<br>alert.</h1>
+  <p class="lede">
+    SonicSentinel AI classifies audio into ten acoustic event classes and raises
+    severity-based alerts. This page documents the system as it actually runs —
+    every claim below was executed, measured, or read out of the source.
+  </p>
+  <div class="hero-meta">
+    <div><span>Python</span><span>3.12.10</span></div>
+    <div><span>Backend</span><span>FastAPI</span></div>
+    <div><span>Frontend</span><span>React 18 + TS</span></div>
+    <div><span>Database</span><span>SQLite</span></div>
+    <div><span>Verified</span><span>28 Sep 2026</span></div>
+  </div>
+</header>
+
+<div class="bay">
+  <div class="bay-bar">
+    <span><b>FIG 01</b> &nbsp;REFERENCE RECORDING</span>
+    <span>STFT · 2048/512 · 78 dB · 54.29 s</span>
+  </div>
+  <img src="assets/spectrogram-hero.png" width="2080" height="832"
+       alt="Spectrogram of the project's 54-second reference recording, showing frequency up to 16 kHz against time, with the 5-second analysis window marked.">
+  <p class="bay-note"><b>Fig 1</b>Short-time Fourier transform of the one genuine long recording in
+  this repository (<code>87c0e526…wav</code>, 54.29&nbsp;s, 48&nbsp;kHz, stereo, 24-bit). The dashed
+  line marks the 5&nbsp;second window the models consume. Every pixel is measured.</p>
+</div>
+
+<div class="bay">
+  <div class="bay-bar">
+    <span><b>FIG 02</b> &nbsp;PEAK ENVELOPE</span>
+    <span>1400 BUCKETS · 2,605,725 SAMPLES</span>
+  </div>
+  <img src="assets/waveform-hero.png" width="2080" height="325"
+       alt="Peak amplitude envelope of the same 54-second recording, 1400 buckets from 2,605,725 samples.">
+  <p class="bay-note"><b>Fig 2</b>Peak envelope of the same file on the same time base, 1400
+  buckets drawn from 2,605,725 samples.</p>
+</div>
+
+<!-- ══ 00 ════════════════════════════════════════════════════════════ -->
+<section id="read">
+  <div class="sec-head"><i>00</i><h2 style="margin:0">Read this first</h2></div>
+  <p class="sec-note">Why this page looks different from the rest of the documentation package.</p>
+
+  <p>
+    The project has two bodies of documentation. One is detailed, confident, and specific about
+    accuracy figures, dataset totals, and a ninety-nine-item requirements matrix. The other marks
+    the same items as unverified. They sit in the same folder under near-identical filenames, so
+    which one a reviewer reads depends on which file they happen to open.
+  </p>
+  <p>
+    This page takes a narrower position. It documents what can be demonstrated, and marks
+    everything else as open. Where a number in the wider package is unsupported, it is named here
+    rather than repeated.
+  </p>
+
+  <div class="note crit">
+    <p class="note-h">Blocking issue</p>
+    <p>
+      The fifteen evaluation graphs in <code>documentation/graphs/</code> are generated from
+      hardcoded literals and random numbers, not from model output. They are titled
+      <em>Confusion Matrix (Test Set)</em> and <em>Macro F1-Score Comparison</em> and are
+      presented as evaluation evidence. Section 07 shows the source.
+    </p>
+  </div>
+</section>
+
+<!-- ══ 01 ════════════════════════════════════════════════════════════ -->
+<section id="verified">
+  <div class="sec-head"><i>01</i><h2 style="margin:0">What was verified</h2></div>
+  <p class="sec-note">Executed on the development machine, not read from documentation.</p>
+
+  <p>
+    The backend was started, the security suite was run against the live server, the API was
+    probed, the TypeScript compiler was run, and the audio corpus was measured. The results:
+  </p>
+
+  <table class="status">
+    <caption>Verification results, 28 September 2026</caption>
+    <colgroup><col class="l"><col><col class="r"></colgroup>
+    <thead>
+      <tr><th scope="col">Area</th><th scope="col">Method</th><th scope="col">Result</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Backend boot &amp; DB</td>
+        <td>uvicorn start, <code>GET /health</code></td>
+        <td><span class="v v-pass">200 connected</span></td>
+      </tr>
+      <tr>
+        <td>Auth &amp; RBAC</td>
+        <td><code>python test_security.py</code> against live server</td>
+        <td><span class="v v-pass">12 / 12</span></td>
+      </tr>
+      <tr>
+        <td>Password storage</td>
+        <td>inspect stored credential, test 11</td>
+        <td><span class="v v-pass">PBKDF2 salt$hash</span></td>
+      </tr>
+      <tr>
+        <td>User data isolation</td>
+        <td>test 9, scoped query check</td>
+        <td><span class="v v-pass">isolated</span></td>
+      </tr>
+      <tr>
+        <td>API surface</td>
+        <td>AST scan of route decorators</td>
+        <td><span class="v v-pass">40 routes</span></td>
+      </tr>
+      <tr>
+        <td>Ensemble inference</td>
+        <td>import, load, forward pass</td>
+        <td><span class="v v-pass">runs</span></td>
+      </tr>
+      <tr>
+        <td>TypeScript build</td>
+        <td><code>npx tsc --noEmit</code></td>
+        <td><span class="v v-fail">4 errors</span></td>
+      </tr>
+      <tr>
+        <td>Upload MIME validation</td>
+        <td>read <code>sniff_audio_content</code></td>
+        <td><span class="v v-fail">no-op</span></td>
+      </tr>
+      <tr>
+        <td>Random Forest usage</td>
+        <td>repo-wide symbol search</td>
+        <td><span class="v v-fail">0 references</span></td>
+      </tr>
+      <tr>
+        <td>Dataset provenance</td>
+        <td>manifest, script, licence search</td>
+        <td><span class="v v-fail">absent</span></td>
+      </tr>
+      <tr>
+        <td>Accuracy claims</td>
+        <td>trace to a reproducible run</td>
+        <td><span class="v v-open">unsupported</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    The security result is the strongest thing here, and it is real. The server access log during
+    the run shows enforcement rather than assertion: a normal user requesting every admin
+    endpoint received <span class="num">403</span>, a wrong password received
+    <span class="num">401</span>, and the stored credential was
+    <span class="num">97</span> characters of salted hash.
+  </p>
+
+  <pre><code>POST /auth/register              <span class="c">201</span>   role=user
+POST /auth/register              <span class="c">201</span>   role=admin in body, ignored
+GET  /api/admin/overview         <span class="c">403</span>   user
+GET  /api/admin/users            <span class="c">403</span>   user
+GET  /api/admin/detections       <span class="c">403</span>   user
+GET  /api/admin/alerts           <span class="c">403</span>   user
+GET  /api/admin/system           <span class="c">403</span>   user
+POST /auth/login  (wrong pwd)    <span class="c">401</span>
+GET  /api/admin/users            <span class="c">200</span>   admin</code></pre>
+
+  <div class="note warn">
+    <p class="note-h">Documented command is wrong</p>
+    <p>
+      The root <code>README.md</code> says
+      <code>python -m pytest test_security.py -v</code>. That produces five errors, because the
+      suite is a plain script whose test functions take required arguments. The working command is
+      <code>python test_security.py</code>, with the backend already running.
+    </p>
+  </div>
+</section>
+
+<!-- ══ 02 ════════════════════════════════════════════════════════════ -->
+<section id="models">
+  <div class="sec-head"><i>02</i><h2 style="margin:0">The two models</h2></div>
+  <p class="sec-note">Two independent classifiers. They never combine and never vote together.</p>
+
+  <p>
+    One classifier is yours, built from three members and running on the server. The other runs in
+    the visitor's browser as a cross-check. Understanding the difference matters, because only one
+    of them owns the answer.
+  </p>
+
+  <table class="status">
+    <caption>Custom ensemble versus the browser model</caption>
+    <colgroup><col class="l"><col><col></colgroup>
+    <thead>
+      <tr>
+        <th scope="col"></th>
+        <th scope="col">Your custom model</th>
+        <th scope="col">The browser model</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Source</td><td><code>ml-service/app/model_evaluator.py</code></td><td><code>src/pages.tsx:594–706</code></td></tr>
+      <tr><td>Runs on</td><td>FastAPI server, CPU</td><td>visitor's device</td></tr>
+      <tr><td>Runtime</td><td>librosa, scikit-learn, NumPy</td><td>TensorFlow.js</td></tr>
+      <tr><td>Format</td><td>joblib <code>.pkl</code>, Keras <code>.keras</code></td><td>tfjs-layers <code>.json</code> + <code>weights.bin</code></td></tr>
+      <tr><td>Members</td><td>three, weighted</td><td>one network</td></tr>
+      <tr><td>Window</td><td><span class="num">5.0 s</span> @ <span class="num">22,050 Hz</span> mono</td><td><span class="num">1.0 s</span> @ <span class="num">44,100 Hz</span>, loudest window</td></tr>
+      <tr><td>Backbone</td><td>YAMNet, fully trainable</td><td>Speech Commands <span class="num">v0.04</span>, frozen</td></tr>
+      <tr><td>Trainable share</td><td>full model</td><td><span class="num">~1.4%</span> — head only</td></tr>
+      <tr><td>Decision rule</td><td><span class="num">0.40 / 0.35 / 0.25</span> weighted sum</td><td>single softmax argmax</td></tr>
+      <tr><td>Agreement signal</td><td><code>agree</code> / <code>weak_agree</code> / <code>disagree</code></td><td>none</td></tr>
+      <tr><td>Owns severity</td><td><span class="v v-pass">yes</span></td><td><span class="v v-open">no</span></td></tr>
+      <tr><td>Stored in DB</td><td><span class="v v-pass">yes</span></td><td><span class="v v-open">never — always <code>None</code></span></td></tr>
+      <tr><td>Fires alerts</td><td><span class="v v-pass">yes</span></td><td><span class="v v-open">no</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>What the browser model actually is</h3>
+  <p>
+    Despite being called <code>GTM_MODEL_URL</code> throughout the code, it is not a Teachable
+    Machine model. <code>model.json</code> is a <em>tfjs-layers</em> network, and
+    <code>metadata.json</code> names the backbone:
+  </p>
+  <pre><code><span class="k">{"tfjsSpeechCommandsVersion"</span>:<span class="s">"0.4.0"</span>,<span class="k">"modelName"</span>:<span class="s">"TMv2"</span>,
+ <span class="k">"wordLabels"</span>:[<span class="s">" Aggression"</span>,<span class="s">" Glass Breaking"</span>,<span class="s">" Gunshot"</span>,…]}</code></pre>
+  <p>
+    Every convolution is marked <code>trainable: false</code>. Only <code>NewHeadDense</code>, a
+    ten-way softmax, is trained. Of roughly 1.44 million parameters, about 20,000 are trainable —
+    this is transfer learning on Google's speech backbone with your label mapping on top.
+  </p>
+  <p>
+    So it is functionally similar to what Teachable Machine produces, but it was not trained in
+    the Teachable Machine interface, and the README's instruction to paste a
+    <code>teachablemachine.withgoogle.com</code> URL into that variable cannot work — the
+    variable holds a local path, and the format does not match.
+  </p>
+
+  <div class="note info">
+    <p class="note-h">Deliberate separation</p>
+    <p>
+      The backend stores <code>"teachable_prediction": None</code> on every detection. When the
+      browser model fails, the interface reports an error rather than reusing the ensemble's
+      numbers as a second opinion. A fallback that looks like two models agreeing is worse than
+      one model with no cross-check.
+    </p>
+  </div>
+
+  <p>
+    Full detail, including the layer-by-layer architecture and the label index comparison, is in
+    <a href="MODEL_COMPARISON.md">MODEL_COMPARISON.md</a>.
+  </p>
+</section>
+
+<!-- ══ 03 ════════════════════════════════════════════════════════════ -->
+<section id="ensemble">
+  <div class="sec-head"><i>03</i><h2 style="margin:0">The ensemble</h2></div>
+  <p class="sec-note">Three members, one fixed weighted sum, read straight from the source.</p>
+
+  <p>Each member produces a ten-class probability vector. The vectors are combined, not stacked — there is no meta-classifier learning how much to trust each member.</p>
+
+  <pre><code><span class="c"># model_evaluator.py:313</span>
+ensemble_probs = (<span class="k">0.40</span> * yamnet_probs) + (<span class="k">0.35</span> * svm_probs) + (<span class="k">0.25</span> * cnn_probs)
+final_label    = CLASS_LABELS[argmax(ensemble_probs)]</code></pre>
+
+  <div class="bay">
+    <div class="bay-bar">
+      <span><b>FIG 03</b> &nbsp;ENSEMBLE WEIGHTS</span>
+      <span>model_evaluator.py:313</span>
+    </div>
+    <canvas id="ensCanvas" width="1040" height="300" role="img"
+      aria-label="Bar chart of ensemble weights: YAMNet 0.40, SVM 0.35, CNN 0.25, summing to 1.00."></canvas>
+    <p class="bay-note"><b>Fig 3</b>Weights as they appear in the source. A weighted vote, not a
+    learned combination — there is no meta-classifier learning how much to trust each member.</p>
+  </div>
+
+  <div class="note warn">
+    <p class="note-h">The comment is wrong</p>
+    <p>
+      Line 312 reads <code>Ensemble Weighted Decision (RF: 0.40, …)</code> but line 313
+      multiplies <code>yamnet_probs</code>. The code is correct; the comment and the root README
+      both say Random Forest. There is no RF in the ensemble.
+    </p>
+  </div>
+
+  <h3>Input features</h3>
+  <p>
+    The SVM member consumes 242 hand-computed features, and the CNN member a
+    <span class="num">128 × 216</span> Mel spectrogram. All three members see the same
+    preprocessed five-second window:
+  </p>
+  <pre><code><span class="c">  0: 80</span>   MFCC, n_mfcc=40       40 means + 40 std
+<span class="c"> 80:208</span>   Mel spectrogram, 64   64 means + 64 std
+<span class="c">208:232</span>   Chroma STFT, 12      12 means + 12 std
+<span class="c">232:242</span>   ZCR, RMS, centroid, bandwidth, rolloff</code></pre>
+</section>
+
+<!-- ══ 04 ════════════════════════════════════════════════════════════ -->
+<section id="severity">
+  <div class="sec-head"><i>04</i><h2 style="margin:0">Severity ladder</h2></div>
+  <p class="sec-note">The confidence thresholds below are read from
+    <code>model_evaluator.py:334–341</code>.</p>
+
+  <p>
+    Severity is not a property of the class alone. It is the class combined with how confident
+    the ensemble was, and the rules are evaluated in order — the first match wins.
+  </p>
+
+  <div class="bay">
+    <div class="bay-bar">
+      <span><b>FIG 04</b> &nbsp;SEVERITY LADDER</span>
+      <span>model_evaluator.py:334–341 · FIRST MATCH WINS</span>
+    </div>
+    <canvas id="sevCanvas" width="1040" height="380" role="img"
+      aria-label="Severity decision ladder showing critical at confidence 0.70 and above, high at 0.50, medium at 0.65, and low otherwise."></canvas>
+    <p class="bay-note"><b>Fig 4</b>Thresholds resolved in source order. Note that rule 3 lets
+    confidence alone escalate any class to medium.</p>
+  </div>
+
+  <h3>The ten classes</h3>
+  <div class="classes">
+    <div class="cls-row"><i>0</i><b>Machinery Fault</b><span class="sev sev-medium">medium</span></div>
+    <div class="cls-row"><i>1</i><b>Glass Breaking</b><span class="sev sev-high">high</span></div>
+    <div class="cls-row"><i>2</i><b>Alarm or Siren</b><span class="sev sev-high">high</span></div>
+    <div class="cls-row"><i>3</i><b>Vehicle Horn</b><span class="sev sev-low">low</span></div>
+    <div class="cls-row"><i>4</i><b>Animal Sound</b><span class="sev sev-low">low</span></div>
+    <div class="cls-row"><i>5</i><b>Gunshot</b><span class="sev sev-critical">critical</span></div>
+    <div class="cls-row"><i>6</i><b>Panic Scream</b><span class="sev sev-critical">critical</span></div>
+    <div class="cls-row"><i>7</i><b>Aggression</b><span class="sev sev-high">high</span></div>
+    <div class="cls-row"><i>8</i><b>Person Asking for Help</b><span class="sev sev-critical">critical</span></div>
+    <div class="cls-row"><i>9</i><b>Background Noise</b><span class="sev sev-low">low</span></div>
+  </div>
+  <p>
+    Labels load at runtime from <code>models/python_model/class_labels.json</code>. The YAMNet
+    loader validates that its class order matches this file exactly, so reordering the taxonomy
+    invalidates the model.
+  </p>
+</section>
+
+<!-- ══ 05 ════════════════════════════════════════════════════════════ -->
+<section id="dataset">
+  <div class="sec-head"><i>05</i><h2 style="margin:0">Dataset state</h2></div>
+  <p class="sec-note">Measured with the project's own provenance tool, not quoted from a summary.</p>
+
+  <p>
+    The documented corpus is <span class="num">6,211</span> clips totalling
+    <span class="num">20,632.6</span> seconds. What is on disk is this:
+  </p>
+
+  <div class="bay">
+    <div class="bay-bar">
+      <span><b>FIG 05</b> &nbsp;CORPUS COVERAGE</span>
+      <span>100 CELLS = DOCUMENTED CORPUS</span>
+    </div>
+    <canvas id="dsCanvas" width="1040" height="250" role="img"
+      aria-label="Two hundred-cell strips, one hundred cells representing the documented corpus each. Measured duration is 105.1 of 20,632 seconds, 0.51 percent. Measured file count is 35 of 6,211, 0.56 percent."></canvas>
+    <p class="bay-note"><b>Fig 5</b>Each strip is the documented corpus divided into one hundred
+    cells. The measured share is drawn at true width — half a cell — because a linear bar chart
+    of a 196:1 ratio shows nothing.</p>
+  </div>
+
+  <table class="status">
+    <caption>Documentation package versus this repository, measured</caption>
+    <colgroup><col><col class="m"><col class="m"></colgroup>
+    <thead>
+      <tr><th scope="col">Property</th><th scope="col">Documented</th><th scope="col">Measured</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Audio files</td><td class="num">6,211</td><td class="num">35</td></tr>
+      <tr><td>Total duration</td><td class="num">20,632.6 s</td><td class="num">105.1 s</td></tr>
+      <tr><td>Unique content</td><td class="num">1,950 groups</td><td class="num">19 groups</td></tr>
+      <tr><td>Sample rate</td><td class="num">22,050 Hz mono</td><td class="num">16 / 24 / 32 / 44.1 / 48 kHz</td></tr>
+      <tr><td>Clip length</td><td class="num">5.0 s windows</td><td class="num">0.2 – 54.3 s</td></tr>
+      <tr><td>Class labels</td><td class="num">10</td><td class="num">0 — all unlabelled</td></tr>
+      <tr><td>Source record</td><td class="num">claimed</td><td class="num">none</td></tr>
+    </tbody>
+  </table>
+
+  <div class="bay">
+    <div class="bay-bar">
+      <span><b>FIG 06</b> &nbsp;CONTENT-HASH DUPLICATION</span>
+      <span>35 FILES · 19 UNIQUE</span>
+    </div>
+    <img src="assets/corpus-dedupe.png" width="1950" height="572"
+         alt="Chart of SHA-256 content hash duplication across the upload corpus: nineteen unique contents across thirty-five files, with sixteen extra copies, one group of nine identical files.">
+    <p class="bay-note"><b>Fig 6</b>One group contains nine byte-identical files. Deduplication by
+    content hash, not filename, is what surfaces this.</p>
+  </div>
+
+  <div class="note crit">
+    <p class="note-h">No provenance exists</p>
+    <p>
+      A search of every source, documentation, and configuration file for
+      <code>Freesound</code>, <code>Pixabay</code>, <code>ElevenLabs</code>, <code>Urban8k</code>
+      and <code>ESC-50</code> returns nothing. There is no download script, no URL manifest, no
+      licence record, and no training corpus in the repository.
+    </p>
+    <p>
+      <code>ml-service/tools/dataset_provenance.py</code> was written to close this from
+      evidence. Point it at the real corpus and it produces a measured inventory plus a
+      provenance document with the source, licence, and synthesis tables left blank to complete
+      from your own download history.
+    </p>
+  </div>
+</section>
+
+<!-- ══ 06 ════════════════════════════════════════════════════════════ -->
+<section id="findings">
+  <div class="sec-head"><i>06</i><h2 style="margin:0">Findings</h2></div>
+  <p class="sec-note">Ordered by risk to a competition submission.</p>
+
+  <table class="status">
+    <caption>Open findings</caption>
+    <colgroup><col style="width:7%"><col><col style="width:15%"></colgroup>
+    <thead>
+      <tr><th scope="col">ID</th><th scope="col">Finding</th><th scope="col">State</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="id">G-1</td><td>Evaluation graphs built from literals and random numbers</td><td><span class="v v-fail">blocking</span></td></tr>
+      <tr><td class="id">D-1</td><td>Two documentation sets with opposite claims</td><td><span class="v v-fail">blocking</span></td></tr>
+      <tr><td class="id">R-1</td><td>Admin password in plaintext in the root README</td><td><span class="v v-fail">blocking</span></td></tr>
+      <tr><td class="id">D-2</td><td>No dataset provenance of any kind</td><td><span class="v v-fail">blocking</span></td></tr>
+      <tr><td class="id">S-1</td><td><code>sniff_audio_content</code> returns true on every branch</td><td><span class="v v-warn">high</span></td></tr>
+      <tr><td class="id">T-1</td><td>TypeScript build fails, blocking deploy</td><td><span class="v v-warn">high</span></td></tr>
+      <tr><td class="id">M-1</td><td>Random Forest artifact never loaded by any code</td><td><span class="v v-warn">medium</span></td></tr>
+      <tr><td class="id">M-2</td><td>Ensemble comment says RF where the code uses YAMNet</td><td><span class="v v-open">low</span></td></tr>
+      <tr><td class="id">M-4</td><td>Label typos: <code>Alaram</code>, <code>vehical</code></td><td><span class="v v-open">low</span></td></tr>
+      <tr><td class="id">M-3</td><td>README says Python 3.11, machine runs 3.12.10</td><td><span class="v v-open">low</span></td></tr>
+      <tr><td class="id">F-1</td><td><code>ProtectedRoute.tsx.disabled</code> is dead code</td><td><span class="v v-open">low</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>The build failure</h3>
+  <pre><code>src/components/Modals.tsx(106,102): TS18048 'detection.confidence' possibly 'undefined'
+src/components/Modals.tsx(116,102): TS18048 'detection.confidence' possibly 'undefined'
+src/pages.tsx(570,11):            TS2322  severity: string not assignable to
+                                        'low' | 'medium' | 'high' | 'critical'
+src/pages.tsx(1153,11):           TS2322  (same cause)</code></pre>
+  <p>
+    <code>src/pages.tsx:55</code> declares a local <code>Detection</code> type that widens
+    <code>severity</code> to <code>string</code>, while the API module uses a strict union.
+    Narrowing the local type to the union resolves all four. This matters beyond local
+    development — the Railway <code>Dockerfile</code> runs <code>npm run build</code>, so
+    deployment is blocked until it is fixed.
+  </p>
+
+  <h3>The dead content check</h3>
+  <pre><code><span class="c"># main.py:705–721 — every branch ends in `or True`</span>
+<span class="k">if</span> suffix == <span class="s">".wav"</span>:
+    <span class="k">return</span> content[:4] == <span class="s">b"RIFF"</span> <span class="k">or</span> <span class="s">b"WAVE"</span> <span class="k">in</span> content[:32] <span class="k">or True</span>
+<span class="k">if</span> suffix == <span class="s">".mp3"</span>:
+    <span class="k">return</span> content[:3] == <span class="s">b"ID3"</span> <span class="k">or</span> … <span class="k">or True</span></code></pre>
+  <p>
+    The function can never return false, so the check at <code>main.py:744</code> always passes.
+    The extension allow-list and the size cap still apply, so this is not an arbitrary-write
+    primitive — but the advertised MIME validation does not exist, and a non-audio payload
+    reaches the decode path. Removing each <code>or True</code> restores it.
+  </p>
+</section>
+
+<!-- ══ 07 ════════════════════════════════════════════════════════════ -->
+<section id="evidence">
+  <div class="sec-head"><i>07</i><h2 style="margin:0">Graph evidence</h2></div>
+  <p class="sec-note">The most serious finding. Read this before submitting.</p>
+
+  <p>
+    All fifteen files in <code>documentation/graphs/</code> are produced by
+    <code>build_diagrams_and_graphs.py</code> from hardcoded literals and a seeded random
+    generator. None is computed from model output. They are captioned
+    <em>Confusion Matrix (Test Set)</em> and <em>Macro F1-Score Comparison</em>.
+  </p>
+
+  <pre><code><span class="c"># build_diagrams_and_graphs.py</span>
+COUNTS     = [681, 734, 524, 327, 928, 826, 349, 802, 300, 740]   <span class="c">:51</span>
+accs       = [93.67, 91.63, 90.99]                                 <span class="c">:84</span>
+precisions = [94.50, 92.19, 90.90]                                 <span class="c">:98</span>
+recalls    = [92.25, 90.46, 90.36]                                 <span class="c">:112</span>
+f1s        = [93.09, 91.13, 90.40]                                 <span class="c">:126</span>
+
+np.random.seed(42)                                                 <span class="c">:139</span>
+<span class="k">for</span> idx, mname, fname <span class="k">in</span> [(0, <span class="s">"Random Forest"</span>, …), (1, <span class="s">"SVM Pipeline"</span>, …), (2, <span class="s">"2D CNN"</span>, …)]:
+    cm = np.zeros((<span class="k">10</span>, <span class="k">10</span>), dtype=<span class="k">int</span>)
+    <span class="k">for</span> i <span class="k">in</span> range(<span class="k">10</span>):
+        correct = <span class="k">int</span>(tot * (<span class="k">0.93</span> - idx * <span class="k">0.015</span>))   <span class="c"># from a formula</span>
+        rem     = tot - correct
+        preds   = np.random.choice(others, size=rem)              <span class="c">:151  random</span>
+        <span class="k">for</span> p <span class="k">in</span> preds: cm[i, p] += <span class="k">1</span>
+
+rf_conf = [94.2, 95.1, 91.8, 93.4, 96.0, 95.8, 92.4, 91.0, 89.5, 96.5]  <span class="c">:168</span>
+svm_conf= [92.0, 93.5, 89.2, 91.0, 94.2, 93.1, 90.1, 89.0, 87.2, 94.8]  <span class="c">:169</span>
+cnn_conf= [91.5, 92.0, 88.5, 90.2, 93.0, 92.4, 89.8, 88.2, 86.5, 93.9]  <span class="c">:170</span></code></pre>
+
+  <p>
+    The confusion matrix diagonal comes from the closed-form expression
+    <span class="num">0.93 − idx × 0.015</span>, and every off-diagonal cell is a
+    <code>np.random.choice</code> draw. The off-diagonal pattern is therefore an artefact of the
+    seed, not a measurement of which classes the model confuses.
+  </p>
+
+  <h3>The prediction log is also generated</h3>
+  <p>
+    <code>documentation/model-evidence/raw_prediction_debug.csv</code> is presented as per-model
+    inference evidence. It shows byte-identical probability vectors for different audio files,
+    which no real model can produce:
+  </p>
+  <pre><code>RF  02fec425…wav  [0.2, 0.03, 0.225, 0.245, 0.065, 0.015, 0.085, 0.055, 0.04, 0.04]
+RF  096aae7f…wav  [0.2, 0.03, 0.225, 0.245, 0.065, 0.015, 0.085, 0.055, 0.04, 0.04]
+RF  17a4e14c…wav  [0.2, 0.03, 0.225, 0.245, 0.065, 0.015, 0.085, 0.055, 0.04, 0.04]
+
+SVM 02fec425…wav  [0.0436, 0.0065, 0.5217, 0.3518, 0.0154, 0.0017, 0.0493, …]
+SVM 096aae7f…wav  [0.0436, 0.0065, 0.5217, 0.3518, 0.0154, 0.0017, 0.0493, …]
+
+true label for every row: <span class="k">"Unknown"</span></code></pre>
+
+  <h3>The requirements matrix is generated by a loop</h3>
+  <p>
+    <code>build_markdown_files.py:20–31</code> constructs ninety-nine requirements by iterating
+    over nine category names, then stamps ninety-six of them
+    <code>IMPLEMENTED</code> with the evidence string
+    <em>Verified via automated security test suite &amp; UI verification</em>. The suite
+    exercises twelve scenarios, not ninety-six requirements. No requirement in that document was
+    written from the SRS.
+  </p>
+
+  <div class="note crit">
+    <p class="note-h">What to do</p>
+    <p>
+      Delete the generated graphs and the generated prediction log, or replace them by running a
+      real evaluation over a named test split. Reporting model performance that was not measured
+      is the one finding that can end a competition entry on its own, and it is the only finding
+      here that is not a documentation or engineering defect.
+    </p>
+  </div>
+</section>
+
+<!-- ══ 08 ════════════════════════════════════════════════════════════ -->
+<section id="fixes">
+  <div class="sec-head"><i>08</i><h2 style="margin:0">Fix list</h2></div>
+  <p class="sec-note">In order. The first four are the ones that matter.</p>
+
+  <table class="status">
+    <caption>Prioritised remediation</caption>
+    <colgroup><col style="width:6%"><col><col class="r"></colgroup>
+    <thead>
+      <tr><th scope="col">#</th><th scope="col">Action</th><th scope="col">Effort</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="id">1</td><td>Remove generated graphs and prediction log, or evaluate for real</td><td class="n">2–4 h</td></tr>
+      <tr><td class="id">2</td><td>Delete the underscore documentation set, keep the honest one</td><td class="n">1 h</td></tr>
+      <tr><td class="id">3</td><td>Remove the admin password from the README, rotate the value</td><td class="n">10 min</td></tr>
+      <tr><td class="id">4</td><td>Run the provenance tool against the real corpus, complete the tables</td><td class="n">2–4 h</td></tr>
+      <tr><td class="id">5</td><td>Fix the four TypeScript errors, unblocking the deploy</td><td class="n">20 min</td></tr>
+      <tr><td class="id">6</td><td>Remove each <code>or True</code> from the content sniffer</td><td class="n">30 min</td></tr>
+      <tr><td class="id">7</td><td>Wire in the Random Forest or delete it and correct the README</td><td class="n">1 h</td></tr>
+      <tr><td class="id">8</td><td>Fix the ensemble comment, label typos, Python version</td><td class="n">15 min</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note warn">
+    <p class="note-h">Check before you write the provenance section</p>
+    <p>
+      If any audio is text-to-speech generated, verify that the specific plan's terms permit
+      training a model on the output — several of these services prohibit it. And if the
+      help class is synthetic-heavy, state whether the test split is real-only, synthetic-only,
+      or mixed, because the reported accuracy changes depending on the answer.
+    </p>
+  </div>
+</section>
+
+<!-- ══ 09 ════════════════════════════════════════════════════════════ -->
+<section id="reference">
+  <div class="sec-head"><i>09</i><h2 style="margin:0">Reference</h2></div>
+  <p class="sec-note">Where each claim on this page comes from.</p>
+
+  <table class="status">
+    <caption>Source documents</caption>
+    <colgroup><col style="width:32%"><col></colgroup>
+    <thead><tr><th scope="col">File</th><th scope="col">Contents</th></tr></thead>
+    <tbody>
+      <tr><td class="id">VERIFICATION_REPORT.md</td><td>All findings with line citations, priority list, cleanup plan</td></tr>
+      <tr><td class="id">DEVELOPER_GUIDE.md</td><td>Setup, ML engine internals, API reference, config, deployment</td></tr>
+      <tr><td class="id">USER_GUIDE.md</td><td>End-user and admin guide, troubleshooting, privacy</td></tr>
+      <tr><td class="id">MODEL_COMPARISON.md</td><td>The two models, layer by layer, with the naming problems</td></tr>
+      <tr><td class="id">diagrams/flow-diagrams.md</td><td>Ten flow diagrams derived from source, each citing its lines</td></tr>
+      <tr><td class="id">tools/dataset_provenance.py</td><td>Provenance capture tool, tested</td></tr>
+      <tr><td class="id">tools/render_figures.py</td><td>Renders Figs 1, 2 and 6 from real audio in this repo</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Reproducing the figures</h3>
+  <pre><code><span class="c"># requires numpy, soundfile, matplotlib</span>
+python documentation/tools/render_figures.py
+
+<span class="c"># requires the backend running on :8000</span>
+cd ml-service
+python test_security.py
+
+<span class="c"># dataset provenance, against wherever the corpus actually lives</span>
+python ml-service/tools/dataset_provenance.py --root <span class="s">"C:/path/to/corpus"</span></code></pre>
+
+  <h3>How to view</h3>
+  <p>
+    Open this file directly, or serve the repository root over HTTP if the browser blocks local
+    asset loads. Use your browser's print dialogue for a PDF; a print stylesheet is included.
+  </p>
+</section>
+
+<footer>
+  <p>Generated from executed tests, measured data, and source reading. Figures 1, 2 and 6 are
+  computed from audio files in this repository at build time.</p>
+  <p>Where the wider documentation package makes a claim this page cannot support, the claim is
+  named as open rather than repeated.</p>
+</footer>
+
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const C = {
+    ink: "#0A0F1C", panel: "#111B2E", rule: "#22304A", ruleHi: "#2E4062",
+    signal: "#38E8C6", warn: "#F5A524", crit: "#FF5470",
+    text: "#E6EDF7", muted: "#8494AC", faint: "#5C6B84"
+  };
+  const MONO = '"IBM Plex Mono", ui-monospace, Consolas, monospace';
+  const SANS = '"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif';
+
+  /* Crisp on high-DPI displays. */
+  function setup(canvas) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = canvas.clientWidth || canvas.width;
+    const scale = canvas.height / canvas.width * cssW;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(scale * dpr);
+    canvas.style.height = scale + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w: cssW, h: scale };
+  }
+
+  function grid(ctx, w, h, rows, x0, x1) {
+    ctx.strokeStyle = C.rule;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= rows; i++) {
+      const y = Math.round(x0 + (x1 - x0) * (i / rows)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+  }
+
+  /* ── Fig 3 — ensemble weights ─────────────────────────────────────── */
+  function ensemble() {
+    const cv = document.getElementById("ensCanvas");
+    if (!cv) return;
+    const { ctx, w, h } = setup(cv);
+    const padL = 44, padR = 78, padT = 26, padB = 46;
+    const plotW = w - padL - padR;
+    const baseY = h - padB;
+
+    const data = [
+      { label: "YAMNet classifier", sub: "1024-D embedding → LogReg", v: 0.40, c: C.signal },
+      { label: "SVM pipeline",       sub: "242 features → SVC RBF",     v: 0.35, c: C.warn },
+      { label: "2D CNN",             sub: "128×216 Mel → Conv2D×3",   v: 0.25, c: C.crit }
+    ];
+
+    ctx.font = `500 11px ${SANS}`;
+    ctx.textBaseline = "middle";
+
+    const slot = plotW / 3;
+    const barW = Math.min(78, slot * 0.34);
+
+    data.forEach((d, i) => {
+      const cx = padL + slot * i + slot / 2;
+      const full = baseY - padT;
+      const bh = full * d.v;
+      const x = cx - barW / 2;
+      const y = baseY - bh;
+
+      // Full-height guide showing where this weight would reach 1.00
+      ctx.strokeStyle = C.rule;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.moveTo(cx, padT); ctx.lineTo(cx, baseY); ctx.stroke();
+      ctx.setLineDash([]);
+
+      const g = ctx.createLinearGradient(0, y, 0, baseY);
+      g.addColorStop(0, d.c);
+      g.addColorStop(1, d.c + "38");
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, barW, bh);
+
+      ctx.fillStyle = d.c;
+      ctx.fillRect(x, y, barW, 2);
+
+      // Measured value, set in the readout face
+      ctx.font = `500 15px ${MONO}`;
+      ctx.fillStyle = C.text;
+      ctx.textAlign = "center";
+      ctx.fillText(d.v.toFixed(2), cx, y - 15);
+
+      ctx.font = `500 12.5px ${SANS}`;
+      ctx.fillStyle = C.text;
+      ctx.textAlign = "center";
+      ctx.fillText(d.label, cx, baseY + 17);
+
+      ctx.font = `400 10.5px ${SANS}`;
+      ctx.fillStyle = C.faint;
+      ctx.fillText(d.sub, cx, baseY + 32);
+    });
+
+    // Baseline
+    ctx.strokeStyle = C.ruleHi;
+    ctx.beginPath();
+    ctx.moveTo(padL - 8, baseY + 0.5); ctx.lineTo(w - padR + 22, baseY + 0.5); ctx.stroke();
+
+    // Sum, stated once
+    ctx.font = `500 11px ${MONO}`;
+    ctx.fillStyle = C.signal;
+    ctx.textAlign = "right";
+    ctx.fillText("Σ 1.00", w - 6, padT - 10);
+    ctx.font = `400 10.5px ${SANS}`;
+    ctx.fillStyle = C.faint;
+    ctx.textAlign = "right";
+    ctx.fillText("model_evaluator.py:313", w - 6, h - 12);
+  }
+
+  /* ── Fig 4 — severity ladder ──────────────────────────────────────── */
+  function severity() {
+    const cv = document.getElementById("sevCanvas");
+    if (!cv) return;
+    const { ctx, w, h } = setup(cv);
+    const padL = 84, padR = 26, padT = 30, padB = 40;
+    const plotW = w - padL - padR;
+
+    const rules = [
+      { tier: "critical", c: C.crit,  at: 0.70, test: "critical class AND conf ≥ 0.70", from: 0.70 },
+      { tier: "high",     c: C.warn,  at: 0.50, test: "high class OR critical ≥ 0.50", from: 0.50 },
+      { tier: "medium",   c: C.text,  at: 0.65, test: "medium class OR conf ≥ 0.65",   from: 0.65 },
+      { tier: "low",      c: C.faint, at: 0.00, test: "any remaining class, any confidence", from: 0 }
+    ];
+
+    const x = v => padL + plotW * v;
+
+    // Confidence axis
+    grid(ctx, w, h, 5, padT, h - padB);
+    ctx.font = `400 10px ${MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.textAlign = "center";
+    for (let i = 0; i <= 4; i++) {
+      const v = i / 4;
+      ctx.fillText(v.toFixed(2), x(v), h - padB + 17);
+    }
+    ctx.textAlign = "left";
+    ctx.fillText("ensemble confidence", padL, h - padB + 33);
+
+    const rowH = (h - padT - padB) / rules.length;
+
+    rules.forEach((r, i) => {
+      const y = padT + rowH * i;
+      const cy = y + rowH / 2;
+
+      // Tier swatch as a real bar, not a pill
+      ctx.fillStyle = r.c;
+      ctx.fillRect(10, cy - 8, 3, 16);
+
+      // Left gutter carries only the tier name, so it never collides with
+      // the rule text sitting inside the plot.
+      ctx.font = `500 13px ${MONO}`;
+      ctx.fillStyle = r.c;
+      ctx.textAlign = "right";
+      ctx.fillText(r.tier, padL - 14, cy);
+
+      // Span this tier can occupy, so overlapping rules stay readable
+      if (r.from > 0) {
+        ctx.fillStyle = r.c + "0e";
+        ctx.fillRect(x(r.from), y + 2, Math.max(0, plotW * (1 - r.from)), rowH - 4);
+      }
+
+      if (r.at > 0) {
+        const tx = Math.round(x(r.at)) + 0.5;
+        ctx.strokeStyle = r.c;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(tx, y + 4);
+        ctx.lineTo(tx, y + rowH - 4);
+        ctx.stroke();
+
+        ctx.fillStyle = r.c;
+        ctx.beginPath();
+        ctx.moveTo(tx, y + 4);
+        ctx.lineTo(tx - 4, y - 2);
+        ctx.lineTo(tx + 4, y - 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // The rule text rides with its marker, and flips to the left of the
+        // marker rather than being clipped at the plot edge.
+        ctx.font = `400 10.5px ${SANS}`;
+        const tw = ctx.measureText(r.test).width;
+        const right = tx + 8 + tw;
+        ctx.fillStyle = r.c + "cc";
+        if (right > w - padR) {
+          ctx.textAlign = "right";
+          ctx.fillText(r.test, tx - 8, cy);
+        } else {
+          ctx.textAlign = "left";
+          ctx.fillText(r.test, tx + 8, cy);
+        }
+
+        ctx.font = `500 10.5px ${MONO}`;
+        ctx.fillStyle = C.text;
+        ctx.textAlign = "left";
+        ctx.fillText(r.at.toFixed(2), tx + 8, y + 13);
+      } else {
+        ctx.strokeStyle = C.rule;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(padL, y + rowH - 0.5);
+        ctx.lineTo(w - padR, y + rowH - 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.font = `400 10.5px ${SANS}`;
+        ctx.fillStyle = C.faint;
+        ctx.textAlign = "left";
+        ctx.fillText(r.test, padL + 8, cy);
+      }
+    });
+
+    // Evaluation order marker
+    ctx.font = `400 10px ${MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.textAlign = "right";
+    ctx.fillText("first match wins", w - 6, h - 12);
+  }
+
+  /* ── Fig 5 — documented vs measured ─────────────────────────────────
+     A 196:1 ratio cannot be read off a linear bar: the measured bar would
+     be half a pixel tall. So the strip is 100 cells of the *documented*
+     corpus, and the measured share is drawn at its true 0.51-cell width. */
+  function dataset() {
+    const cv = document.getElementById("dsCanvas");
+    if (!cv) return;
+    const { ctx, w, h } = setup(cv);
+    const padL = 92, padR = 116, padT = 40, padB = 46;
+    const plotW = w - padL - padR;
+    const cells = 100;
+
+    const rows = [
+      { label: "duration", doc: 20632.617, got: 105.12,  gotTxt: "105.1 s"  },
+      { label: "file count", doc: 6211,     got: 35,     gotTxt: "35 files" }
+    ];
+
+    // Header
+    ctx.font = `400 10.5px ${SANS}`;
+    ctx.fillStyle = C.faint;
+    ctx.textAlign = "left";
+    ctx.fillText(`100 cells = the documented corpus`, padL - 78, padT - 18);
+
+    ctx.font = `500 14px ${MONO}`;
+    ctx.fillStyle = C.crit;
+    ctx.textAlign = "right";
+    ctx.fillText("≈ 0.5% present", w - 6, padT - 18);
+
+    const rowH = 40;
+    const gapY = 18;
+    const top = padT;
+
+    rows.forEach((d, i) => {
+      const y = top + (rowH + gapY) * i;
+      const frac = d.got / d.doc;
+
+      ctx.font = `500 11.5px ${MONO}`;
+      ctx.fillStyle = C.text;
+      ctx.textAlign = "right";
+      ctx.fillText(d.label, padL - 10, y + rowH / 2);
+
+      // The documented corpus, in full
+      const cw = plotW / cells;
+      for (let k = 0; k < cells; k++) {
+        ctx.fillStyle = C.rule;
+        ctx.fillRect(padL + k * cw, y, Math.max(0.6, cw - 1), rowH);
+      }
+
+      // The measured share, at true width — about half a cell
+      const fw = Math.max(1.5, plotW * frac);
+      const g = ctx.createLinearGradient(padL, 0, padL + Math.max(fw, 40), 0);
+      g.addColorStop(0, C.signal);
+      g.addColorStop(1, C.signal + "66");
+      ctx.fillStyle = g;
+      ctx.fillRect(padL, y, fw, rowH);
+
+      // Leader so the sliver is locatable
+      ctx.strokeStyle = C.signal;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padL + fw + 0.5, y);
+      ctx.lineTo(padL + fw + 0.5, y + rowH);
+      ctx.stroke();
+
+      ctx.font = `500 11px ${MONO}`;
+      ctx.fillStyle = C.muted;
+      ctx.textAlign = "left";
+      ctx.fillText(`${d.gotTxt}  of  ${d.doc.toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+                   padL + plotW + 12, y + rowH / 2 - 6);
+      ctx.font = `400 10px ${SANS}`;
+      ctx.fillStyle = C.faint;
+      ctx.fillText(`(${(frac * 100).toFixed(2)}%)`, padL + plotW + 12, y + rowH / 2 + 8);
+    });
+
+    // Axis
+    const ay = top + (rowH + gapY) * rows.length + 2;
+    ctx.strokeStyle = C.ruleHi;
+    ctx.beginPath();
+    ctx.moveTo(padL, ay + 0.5);
+    ctx.lineTo(padL + plotW, ay + 0.5);
+    ctx.stroke();
+
+    ctx.font = `400 9.5px ${MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.textAlign = "center";
+    [0, 25, 50, 75, 100].forEach(v => {
+      ctx.fillText(String(v), padL + plotW * (v / 100), ay + 15);
+    });
+    ctx.textAlign = "left";
+    ctx.font = `400 9.5px ${SANS}`;
+    ctx.fillText("cells", padL + plotW + 12, ay + 15);
+  }
+
+  /* ── rail nav + mobile drawer ─────────────────────────────────────── */
+  function nav() {
+    const links = Array.from(document.querySelectorAll(".rail nav a"));
+    const sections = links
+      .map(a => ({ a, el: document.querySelector(a.getAttribute("href")) }))
+      .filter(x => x.el);
+
+    if (!sections.length) return;
+
+    let active = null;
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        const hit = sections.find(s => s.el === e.target);
+        if (!hit || hit === active) return;
+        active = hit;
+        links.forEach(l => l.removeAttribute("aria-current"));
+        hit.a.setAttribute("aria-current", "true");
+      });
+    }, { rootMargin: "-12% 0px -70% 0px", threshold: 0 });
+
+    sections.forEach(s => io.observe(s.el));
+  }
+
+  function drawer() {
+    const btn = document.getElementById("railToggle");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const open = document.body.classList.toggle("nav-open");
+      btn.setAttribute("aria-expanded", String(open));
+    });
+    document.querySelectorAll(".rail nav a").forEach(a => {
+      a.addEventListener("click", () => {
+        document.body.classList.remove("nav-open");
+        btn.setAttribute("aria-expanded", "false");
+      });
+    });
+  }
+
+  function drawAll() { ensemble(); severity(); dataset(); }
+
+  /* Draw synchronously first. requestAnimationFrame is throttled in a
+     background tab, so deferring the first paint to rAF leaves the figures
+     blank until the reader interacts with the page. rAF is used only to
+     coalesce resize events. */
+  let raf;
+  function onResize() {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(drawAll);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", drawAll);
+  } else {
+    drawAll();
+  }
+  window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
+
+  /* Re-measure once the real typeface lands, since the canvases place text. */
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { cancelAnimationFrame(raf); drawAll(); });
+  }
+
+  /* The bay width tracks the viewport, so observe it rather than guessing. */
+  const firstBay = document.querySelector(".bay");
+  if (firstBay && typeof ResizeObserver === "function") {
+    let lastW = firstBay.clientWidth;
+    new ResizeObserver(() => {
+      if (Math.abs(firstBay.clientWidth - lastW) < 2) return;
+      lastW = firstBay.clientWidth;
+      onResize();
+    }).observe(firstBay);
+  }
+
+  nav();
+  drawer();
+})();
+</script>
+</body>
+</html>

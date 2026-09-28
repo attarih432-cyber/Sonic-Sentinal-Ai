@@ -1,216 +1,500 @@
 import {useEffect, useRef, useState, useCallback} from 'react';
 import {motion, AnimatePresence} from 'framer-motion';
-import {Activity, AlertTriangle, Camera, CameraOff, Download, Expand, FileAudio, Loader2, Mic, MicOff, MonitorSmartphone, RefreshCw, Square, Video, Zap, CheckCircle2, ShieldAlert} from 'lucide-react';
-import {liveApi} from './api/live';
+import {Activity, AlertTriangle, Camera, CameraOff, Download, Expand, FileAudio, Loader2, Mic, MicOff, MonitorSmartphone, RefreshCw, ShieldAlert, Square, Video, Waves, Zap} from 'lucide-react';
+import {liveApi, liveErrorMessage, type WarmupState} from './api/live';
 import {sessionsApi, type LiveSession} from './api/sessions';
 import {api} from './api/client';
-import type {Detection} from './api/detections';
+import type {Detection, ModelResult} from './api/detections';
 import {Modal} from './ui';
+import {MicrophoneEngine} from './lib/micEngine';
+import {loadTeachableMachine, recognizeWindow, type TmResult, type TmStatus} from './lib/teachableMachine';
+import './live.css';
 
-type PermState = 'idle' | 'requesting' | 'granted' | 'denied' | 'unsupported';
 type Tab = 'audio' | 'camera' | 'events';
+type MicStatus = 'off' | 'starting' | 'on';
+type PermState = 'idle' | 'requesting' | 'granted' | 'denied' | 'unsupported';
+
+/**
+ * Window length. The server models are built around a 5 s window:
+ * extract_tabular_features pads/crops to sr*5 and extract_mel_spectrogram
+ * fills 216 mel columns, which only 5 s of audio produces. A shorter window
+ * would hand the CNN a third of its input as zeros, so the window must be 5 s.
+ */
+const WINDOW_SECONDS = 5;
+
+/**
+ * How often a new window is cut. Shorter than the window, so consecutive
+ * windows overlap and the panel still feels continuous instead of pausing
+ * between 5 s blocks.
+ */
+const WINDOW_INTERVAL_MS = 2500;
+
+/** Server-side models, in the order the live panel lists them. */
+const SERVER_MODELS = ['yamnet', 'cnn', 'svm'] as const;
 
 function NiceTime({iso}:{iso:string}){ const d = new Date(iso); return <span>{d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>; }
+function ClockTime({at}:{at:Date|null}){ return <span className="lm-mono">{at ? at.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--:--:--'}</span>; }
 
-/* ---------------- AUDIO MONITOR (REAL mic + Web Audio) ---------------- */
+/* ---------------- ONE SERVER-SIDE MODEL TILE ---------------- */
+function ModelTile({m}:{m:ModelResult}){
+  const ran = m.status === 'evaluated' && !!m.classification;
+  return <div className={'lm-model' + (ran ? '' : ' idle')}>
+    <div className="lm-model-head">
+      <b>{m.name}</b>
+      <span className={'pill ' + (ran ? 'seg-ok' : 'seg-low')}>{ran ? 'ran' : m.status.replace(/_/g, ' ')}</span>
+    </div>
+    {ran
+      ? <>
+        <div className="lm-model-class">{m.classification}</div>
+        <div className="lm-bar" role="img" aria-label={`confidence ${Math.round(m.confidence * 100)} percent`}>
+          <i style={{transform:`scaleX(${Math.max(0, Math.min(1, m.confidence))})`}}/>
+        </div>
+        <div className="lm-model-foot">
+          <span className="lm-mono">{Math.round(m.confidence * 100)}%</span>
+          {m.accuracy != null && <span className="lm-muted">test acc {Math.round(m.accuracy * 100)}%</span>}
+        </div>
+      </>
+      : <p className="lm-model-reason">{m.reason || 'This model produced no result for this window.'}</p>}
+  </div>;
+}
+
+/* ---------------- TEACHABLE MACHINE PANEL ---------------- */
+function TmPanel({status, err, result, updatedAt}:{
+  status: TmStatus; err: string; result: TmResult | null; updatedAt: Date | null;
+}){
+  const top = result?.topSound ?? null;
+  return <div className="lm-tm">
+    <div className="section-head">
+      <div>
+        <h3>Teachable Machine <span className="lm-tag">runs in your browser</span></h3>
+        <p className="muted">Independent result — its audio is never uploaded, and it is not part of the merged decision above.</p>
+      </div>
+      {status === 'ready' && <span className="pill seg-ok">{result ? 'running' : 'loaded'}</span>}
+      {status === 'loading' && <span className="pill seg-medium"><Loader2 className="spin" size={11}/> loading</span>}
+      {status === 'error' && <span className="pill seg-critical">failed to load</span>}
+      {status === 'idle' && <span className="pill seg-low">not started</span>}
+    </div>
+
+    {status === 'idle' && <div className="empty-state lm-empty"><MicOff size={24}/><p className="muted">Start the microphone to run the Teachable Machine model on the same window.</p></div>}
+    {status === 'loading' && <div className="center-pad"><Loader2 className="spin" size={20}/><p className="muted">Loading the Teachable Machine graph and its metadata…</p></div>}
+    {status === 'error' && <p className="err-text">{err || 'The Teachable Machine model could not be loaded.'}</p>}
+
+    {status === 'ready' && result && <>
+      <div className="lm-pred">
+        <div className="lm-pred-label">Highest-confidence class</div>
+        <div className="lm-pred-value">{top ? top.label : '—'}</div>
+        <div className="lm-pred-meta">
+          <span className="lm-mono">{top ? Math.round(top.score * 100) : 0}%</span>
+          <span className="lm-muted">{result.windowSeconds.toFixed(2)}s window @ {result.sampleRate / 1000} kHz</span>
+          <ClockTime at={updatedAt}/>
+        </div>
+        {result.top && result.top.isBackground && (
+          <p className="lm-note">The model's own background/silence class scored highest, so no sound was above it.</p>
+        )}
+      </div>
+
+      <div className="lm-tm-bars">
+        <div className="lm-tm-bars-head">
+          <b>All {result.scores.length} classes</b>
+          <span className="lm-muted">index order as loaded from the model</span>
+        </div>
+        {result.scores.map(s => <div key={s.index} className={'lm-tm-row' + (s.isTop ? ' top' : '') + (s.isBackground ? ' bg' : '')}>
+          <span className="lm-tm-name" title={`index ${s.index} — ${s.rawLabel}`}>{s.label}</span>
+          <span className="lm-tm-track"><i style={{transform:`scaleX(${Math.max(0, Math.min(1, s.score))})`}}/></span>
+          <span className="lm-tm-val lm-mono">{(s.score * 100).toFixed(1)}%</span>
+        </div>)}
+      </div>
+    </>}
+    {status === 'ready' && !result && err && (
+      <div className="center-pad lm-tm-err"><AlertTriangle size={18}/><p className="muted">{err}</p></div>
+    )}
+    {status === 'ready' && !result && !err && <div className="center-pad"><Waves size={22}/><p className="muted">Waiting for the first window…</p></div>}
+  </div>;
+}
+
+/* ---------------- LIVE MICROPHONE (real capture → real predictions) ---------------- */
 function AudioMonitor(){
-  const [perm,setPerm]=useState<PermState>('idle');
-  const [listening,setListening]=useState(false);
-  const [results,setResults]=useState<Detection[]>([]);
-  const [err,setErr]=useState('');
-  const [rms,setRms]=useState(0);
-  const [modelStatus,setModelStatus]=useState('');
-  const [session,setSession]=useState<LiveSession|null>(null);
-  const streamRef=useRef<MediaStream|null>(null);
-  const ctxRef=useRef<AudioContext|null>(null);
-  const analyserRef=useRef<AnalyserNode|null>(null);
-  const recorderRef=useRef<MediaRecorder|null>(null);
-  const canvasRef=useRef<HTMLCanvasElement|null>(null);
-  const rafRef=useRef<number>(0);
-  const chunkRef=useRef<Blob[]>([]);
-  const sessionIdRef=useRef<string|null>(null);
-  const resultsRef=useRef<Detection[]>([]);
+  const [status, setStatus] = useState<MicStatus>('off');
+  const [err, setErr] = useState('');
+  const [level, setLevel] = useState(0);
+  const [current, setCurrent] = useState<Detection | null>(null);
+  const [history, setHistory] = useState<Detection[]>([]);
+  const [windows, setWindows] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [analysing, setAnalysing] = useState(false);
+  const [tmStatus, setTmStatus] = useState<TmStatus>('idle');
+  const [tmErr, setTmErr] = useState('');
+  const [tm, setTm] = useState<TmResult | null>(null);
+  const [tmAt, setTmAt] = useState<Date | null>(null);
+  const [session, setSession] = useState<LiveSession | null>(null);
+  const [modelStatus, setModelStatus] = useState('');
+  const [warm, setWarm] = useState<WarmupState | null>(null);
+  const [repeatRun, setRepeatRun] = useState(0);
 
-  const drawVisualizer=useCallback(()=>{
-    const canvas=canvasRef.current, analyser=analyserRef.current;
-    if(!canvas||!analyser) return;
-    const c=canvas.getContext('2d'); if(!c) return;
-    const W=canvas.width=canvas.offsetWidth*2, H=canvas.height=140*2;
-    c.fillStyle='#070b11'; c.fillRect(0,0,W,H);
-    const data=new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteTimeDomainData(data);
-    c.strokeStyle='#00f0ff'; c.lineWidth=3; c.shadowColor='rgba(0,240,255,.75)'; c.shadowBlur=12; c.beginPath();
-    const step=W/data.length;
-    for(let i=0;i<data.length;i++){ const v=data[i]/128.0, y=H/2+v*H/2.5; i===0?c.moveTo(i*step,y):c.lineTo(i*step,y); }
-    c.stroke();
-    // RMS (real)
-    let sum=0; for(let i=0;i<data.length;i++){ const v=(data[i]-128)/128; sum+=v*v; }
-    setRms(Math.sqrt(sum/data.length));
-    rafRef.current=requestAnimationFrame(drawVisualizer);
-  },[]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const engineRef = useRef<MicrophoneEngine | null>(null);
+  const tmRef = useRef<any>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const aliveRef = useRef(true);
+  const busyRef = useRef(false);
+  const seqRef = useRef(0);
+  const lastClassRef = useRef<string | null>(null);
+  const repeatRef = useRef(0);
 
-  const stopTracks=()=>{ if(streamRef.current){ streamRef.current.getTracks().forEach(t=>t.stop()); streamRef.current=null; } };
-  const cleanup=()=>{
-    if(recorderRef.current&&recorderRef.current.state!=='inactive'){ try{recorderRef.current.stop();}catch{} }
-    stopTracks();
-    if(ctxRef.current){ ctxRef.current.close().catch(()=>{}); ctxRef.current=null; }
-    cancelAnimationFrame(rafRef.current);
-  };
+  const toast = (type: string, message: string) =>
+    window.dispatchEvent(new CustomEvent('sonic:toast', {detail: {type, message}}));
 
-  const checkPermission=async()=>{
-    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ setPerm('unsupported'); return; }
-    try{
-      if(navigator.permissions&&navigator.permissions.query){
-        const st=await navigator.permissions.query({name:'microphone' as PermissionName});
-        if(st.state==='denied'){ setPerm('denied'); return; }
+  /* ---- classify one window; server models and the browser model in parallel ---- */
+  const classify = useCallback(async (wav: Blob, samples: Float32Array, rate: number) => {
+    if (busyRef.current) return;             // never stack overlapping requests
+    busyRef.current = true;
+    setAnalysing(true);
+    const seq = ++seqRef.current;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+    const serverCall = liveApi.analyzeChunk(wav, `live_mic_${stamp}.wav`, sessionIdRef.current);
+    const tmCall = tmRef.current
+      ? recognizeWindow(tmRef.current, samples, rate)
+      : Promise.reject(new Error('Teachable Machine is still loading.'));
+
+    const [server, browser] = await Promise.allSettled([serverCall, tmCall]);
+
+    // A newer window started while this one was in flight: drop this result so
+    // the panel can never show an older prediction over a newer one.
+    if (!aliveRef.current || seq !== seqRef.current) return;
+
+    if (server.status === 'fulfilled') {
+      const det = server.value.data;
+      setCurrent(det);
+      setUpdatedAt(new Date());
+      setWindows(w => w + 1);
+      setHistory(prev => [det, ...prev].slice(0, 25));
+      if (det.classification === lastClassRef.current) {
+        repeatRef.current += 1;
+      } else {
+        lastClassRef.current = det.classification ?? null;
+        repeatRef.current = 0;
       }
-      setPerm('granted');
-    }catch{ setPerm('granted'); }
-  };
+      setRepeatRun(repeatRef.current);
+      if (det.severity === 'high' || det.severity === 'critical') {
+        toast('alert', `${det.severity.toUpperCase()}: ${det.classification} detected`);
+      }
+      setErr('');
+    } else {
+      setErr(liveErrorMessage(server.reason, 'The backend could not classify this window.'));
+    }
 
-  const intervalRef = useRef<any>(null);
-  const listeningRef = useRef(false);
+    if (browser.status === 'fulfilled') {
+      setTm(browser.value);
+      setTmAt(new Date());
+    } else if (tmRef.current) {
+      setTmErr((browser.reason as Error)?.message || 'Teachable Machine inference failed for this window.');
+    }
 
-  useEffect(() => {
-    checkPermission();
-    api.get('/models').then(r => {
-      const loaded = Array.isArray(r.data) && r.data.some((x: any) => x.status === 'loaded');
-      setModelStatus(loaded ? 'loaded' : 'active');
-    }).catch(() => {});
-    return cleanup;
+    busyRef.current = false;
+    if (aliveRef.current && seq === seqRef.current) setAnalysing(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const recordChunk = useCallback(() => {
-    if (!streamRef.current || !listeningRef.current) return;
-    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
-    let rec: MediaRecorder;
-    try {
-      rec = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
-    } catch {
-      rec = new MediaRecorder(streamRef.current);
+  /* ---- engine + teardown ---- */
+  const shutdown = useCallback(async (closeSession: boolean) => {
+    seqRef.current++;                       // invalidate any in-flight result
+    busyRef.current = false;
+    await engineRef.current?.stop();
+    const sid = sessionIdRef.current;
+    sessionIdRef.current = null;
+    if (closeSession && sid) {
+      try { setSession((await sessionsApi.stop(sid)).data); }
+      catch { /* the session is best-effort bookkeeping */ }
     }
-    const chunks: Blob[] = [];
-    rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-    rec.onstop = () => {
-      if (chunks.length === 0 || !listeningRef.current) return;
-      const blob = new Blob(chunks, { type: mime || 'audio/webm' });
-      const ext = mime.includes('mp4') ? 'm4a' : 'webm';
-      const fname = `live_mic_${Date.now()}.${ext}`;
-      liveApi.analyzeChunk(blob, fname, sessionIdRef.current).then(r => {
-        const det = r.data;
-        resultsRef.current = [det, ...resultsRef.current].slice(0, 25);
-        setResults([...resultsRef.current]);
-        if (det.severity === 'high' || det.severity === 'critical') {
-          window.dispatchEvent(new CustomEvent('sonic:toast', { detail: { type: 'alert', message: `${det.severity.toUpperCase()}: ${det.classification} detected` } }));
-        }
-      }).catch(e => {
-        const msg = e.response?.data?.detail ?? 'Chunk analysis failed';
-        setErr(msg);
-      });
-    };
-    rec.start();
-    setTimeout(() => {
-      if (rec.state === 'recording') {
-        try { rec.stop(); } catch {}
-      }
-    }, 3500);
   }, []);
 
-  const start = async () => {
-    setErr('');
-    try {
-      setPerm('requesting');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      setPerm('granted');
-      listeningRef.current = true;
-      setListening(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      // Page change or unmount: release the mic, the graph and the session.
+      aliveRef.current = false;
+      void shutdown(true);
+    };
+  }, [shutdown]);
 
-      const ctx = new AudioContext();
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
-      ctxRef.current = ctx;
-      const src = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.75;
-      src.connect(analyser);
-      analyserRef.current = analyser;
-      drawVisualizer();
-
+  useEffect(() => {
+    // Unmount is the normal path, but a closed or reloaded tab never runs it.
+    // Releasing the tracks and closing the backend session here means the
+    // microphone is never left hot after the page is gone.
+    const onPageHide = () => {
+      aliveRef.current = false;
+      void engineRef.current?.stop();
+      const sid = sessionIdRef.current;
+      sessionIdRef.current = null;
+      if (!sid) return;
+      const url = `${(api as any).defaults.baseURL ?? ''}/live/sessions/${sid}/stop`.replace(/\/{2,}/g, '/');
       try {
-        const s = await sessionsApi.start('microphone');
-        sessionIdRef.current = s.data.id;
-        setSession(s.data);
+        navigator.sendBeacon(url, new Blob([], { type: 'application/json' }));
       } catch {
-        sessionIdRef.current = null;
+        void sessionsApi.stop(sid).catch(() => { /* the session expires server-side */ });
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
+  useEffect(() => {
+    api.get('/models')
+      .then(r => {
+        const list = Array.isArray(r.data) ? r.data : [];
+        setModelStatus(list.some((x: any) => x.status === 'loaded') ? 'loaded' : 'active');
+      })
+      .catch(() => { /* the status chip is informational only */ });
+
+    // A cold backend spends over a minute building the YAMNet graph. Say so,
+    // instead of leaving the first window looking hung.
+    let alive = true;
+    const pollWarm = () => {
+      liveApi.warmup()
+        .then(r => { if (alive) setWarm(r.data.modelWarmup ?? null); })
+        .catch(() => { /* health is best effort */ });
+    };
+    pollWarm();
+    const iv = window.setInterval(pollWarm, 5000);
+    return () => { alive = false; window.clearInterval(iv); };
+  }, []);
+
+  /* ---- visualiser: reads the live analyser, writes to the canvas ---- */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let raf = 0;
+    let lastPush = 0;
+    const buf = new Uint8Array(2048);
+
+    const draw = () => {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = Math.max(1, Math.floor((canvas.offsetWidth || 600) * dpr));
+      const h = Math.max(1, Math.floor(140 * dpr));
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+
+      ctx.fillStyle = '#02050c';
+      ctx.fillRect(0, 0, w, h);
+
+      const analyser = engineRef.current?.analyserNode ?? null;
+      const live = !!analyser;
+
+      if (live && analyser) {
+        analyser.getByteTimeDomainData(buf);
+      } else {
+        buf.fill(128);                       // idle: a flat centre line, not a fake wave
       }
 
-      recordChunk();
-      intervalRef.current = setInterval(recordChunk, 3700);
+      // mean-removed trace so silence sits on the centre line
+      let mean = 0;
+      for (let i = 0; i < buf.length; i++) mean += buf[i];
+      mean /= buf.length;
 
-      window.dispatchEvent(new CustomEvent('sonic:toast', { detail: { type: 'info', message: 'Mic listening started' } }));
-    } catch (e: any) {
-      listeningRef.current = false;
-      setListening(false);
-      setPerm('denied');
-      setErr(e.name === 'NotAllowedError' ? 'Microphone permission denied' : e.name === 'NotFoundError' ? 'No microphone found' : e.message ?? 'Mic start failed');
+      let sum = 0;
+      ctx.beginPath();
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - mean) / 128;
+        sum += v * v;
+        const x = (i / (buf.length - 1)) * w;
+        const y = h / 2 + v * (h / 2.4);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = live ? '#00f0ff' : '#2a3550';
+      ctx.lineWidth = Math.max(1.5, 2 * dpr);
+      ctx.shadowColor = live ? 'rgba(0,240,255,.6)' : 'transparent';
+      ctx.shadowBlur = live ? 10 : 0;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // only ~9 React updates per second, not 60
+      const now = performance.now();
+      if (now - lastPush > 110) {
+        lastPush = now;
+        setLevel(Math.sqrt(sum / buf.length));
+      }
+      raf = requestAnimationFrame(draw);
+    };
+
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  /* ---- start / stop ---- */
+  const start = async () => {
+    if (engineRef.current?.isRunning()) return;     // refuse a second stream
+    setErr('');
+    setTmErr('');
+    setStatus('starting');
+    aliveRef.current = true;
+    lastClassRef.current = null;
+    repeatRef.current = 0;
+    setRepeatRun(0);
+    setCurrent(null);
+    setTm(null);
+
+    // Warm the browser model in parallel with the permission prompt.
+    setTmStatus('loading');
+    loadTeachableMachine()
+      .then(rec => {
+        if (!aliveRef.current) return;
+        tmRef.current = rec;
+        setTmStatus('ready');
+      })
+      .catch((e: any) => {
+        if (!aliveRef.current) return;
+        tmRef.current = null;
+        setTmStatus('error');
+        setTmErr(e?.message || 'The Teachable Machine model could not be loaded.');
+      });
+
+    if (!engineRef.current) {
+      engineRef.current = new MicrophoneEngine({
+        windowSeconds: WINDOW_SECONDS,
+        intervalMs: WINDOW_INTERVAL_MS,
+        onWindow: (w) => { void classify(w.wav, w.samples, w.sampleRate); },
+        onLevel: (l) => setLevel(l),
+        onError: (message) => {
+          if (!aliveRef.current) return;
+          setStatus('off');
+          setErr(message);
+          setLevel(0);
+        },
+      });
     }
+
+    await engineRef.current.start();
+    if (!aliveRef.current) { void shutdown(true); return; }
+    if (engineRef.current.currentState !== 'running') { setStatus('off'); return; }
+
+    setStatus('on');
+    try {
+      const s = await sessionsApi.start('microphone');
+      if (!aliveRef.current) { void sessionsApi.stop(s.data.id); return; }
+      sessionIdRef.current = s.data.id;
+      setSession(s.data);
+    } catch {
+      sessionIdRef.current = null;          // monitoring still works without it
+    }
+    toast('info', `Microphone live — a ${WINDOW_SECONDS}s window every ${(WINDOW_INTERVAL_MS / 1000).toFixed(1)}s`);
   };
 
   const stop = async () => {
-    listeningRef.current = false;
-    setListening(false);
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    if (sessionIdRef.current) {
-      try {
-        const s = await sessionsApi.stop(sessionIdRef.current);
-        setSession(s.data);
-      } catch {}
-    }
-    stopTracks();
-    if (ctxRef.current) {
-      ctxRef.current.close().catch(() => {});
-      ctxRef.current = null;
-    }
-    cancelAnimationFrame(rafRef.current);
-    setRms(0);
-    sessionIdRef.current = null;
-    window.dispatchEvent(new CustomEvent('sonic:toast', { detail: { type: 'info', message: 'Mic stopped — session saved' } }));
+    await shutdown(true);
+    setStatus('off');
+    setLevel(0);
+    setAnalysing(false);
+    setWindows(0);
+    toast('info', 'Microphone stopped — tracks released');
   };
 
-  const clearResults=()=>{ resultsRef.current=[]; setResults([]); };
+  const clearHistory = () => setHistory([]);
+
+  const breakdown = current?.modelBreakdown ?? null;
+  const mergedClass = current?.classification ?? null;
+  const mergedConf = current?.confidence ?? 0;
+  const isNoEvent = !mergedClass || mergedClass === 'No event detected';
 
   return <div className="live-panel card">
-    <div className="section-head"><div><h3>Live microphone monitor</h3><p className="muted">Real audio from your mic — analyzed in 4s chunks</p></div>
-      {modelStatus&&<span className={'pill '+(modelStatus==='loaded'?'seg-ok':'seg-low')}>model: {modelStatus}</span>}</div>
+    <div className="section-head">
+      <div>
+        <h3>Live microphone</h3>
+        <p className="muted">Continuous capture — a rolling {WINDOW_SECONDS}s window is re-classified every {(WINDOW_INTERVAL_MS / 1000).toFixed(1)}s by the server models and by the Teachable Machine model in your browser.</p>
+      </div>
+      {status === 'on' && <span className="pill live"><span className="pulse-dot"/> Listening</span>}
+      {status === 'starting' && <span className="pill seg-medium"><Loader2 className="spin" size={11}/> starting</span>}
+      {status === 'off' && <span className="pill seg-low">Microphone off</span>}
+      {modelStatus && <span className={'pill ' + (modelStatus === 'loaded' ? 'seg-ok' : 'seg-low')}>models: {modelStatus}</span>}
+    </div>
+
+    <div className="live-controls">
+      {status === 'on'
+        ? <button className="lm-stop" onClick={stop}><Square size={14}/> Stop Microphone</button>
+        : <button className="lm-start" onClick={start} disabled={status === 'starting'}>
+            {status === 'starting' ? <><Loader2 className="spin" size={16}/> Requesting microphone…</> : <><Mic size={16}/> Start Live Microphone</>}
+          </button>}
+      {status === 'on' && <span className="lm-hint">window #{windows + (analysing ? 1 : 0)} in flight</span>}
+      {history.length > 0 && <button className="ghost tiny" onClick={clearHistory}><RefreshCw size={13}/> Clear</button>}
+      {session && <span className="pill pill-soft">session {session.id.slice(-6)} · {session.detectionCount} detections</span>}
+    </div>
+
     <div className="live-visual">
       <canvas ref={canvasRef} className="wave-canvas"/>
-      <div className="rms-meter"><span className="muted">RMS</span><div className="rms-fill" style={{transform:`scaleX(${Math.min(1,rms*8)})`}}/><b>{(rms*100).toFixed(0)}%</b></div>
-      {perm==='idle'&&<div className="center-pad muted">Microphone not started yet</div>}
-      {perm==='requesting'&&<div className="center-pad"><Loader2 className="spin" size={22}/><p className="muted">Requesting microphone…</p></div>}
-      {perm==='denied'&&<div className="center-pad"><ShieldAlert size={24}/><p className="muted">Microphone permission denied. Enable it in browser settings and try again.</p></div>}
-      {perm==='unsupported'&&<div className="center-pad"><MicOff size={24}/><p className="muted">Microphone not supported in this browser.</p></div>}
+      <div className="rms-meter"><span className="muted">RMS</span><div className="rms-fill" style={{transform:`scaleX(${Math.min(1, level * 8)})`}}/><b>{(level * 100).toFixed(0)}%</b></div>
+      {status === 'off' && <div className="center-pad">
+        {err ? <><ShieldAlert size={24}/><p className="muted">{err}</p></> : <><MicOff size={24}/><p className="muted">Microphone is off. Press “Start Live Microphone” to begin.</p></>}
+      </div>}
+      {status === 'starting' && <div className="center-pad"><Loader2 className="spin" size={22}/><p className="muted">Requesting microphone access…</p></div>}
     </div>
-    {err&&<p className="err-text">{err}</p>}
-    <div className="live-controls">
-      {!listening?<button className="primary" onClick={start} disabled={perm==='unsupported'}><Mic size={16}/> Start listening</button>
-      :<button className="ghost danger" onClick={stop}><Square size={14}/> Stop session</button>}
-      {results.length>0&&<button className="ghost tiny" onClick={clearResults}><RefreshCw size={13}/> Clear</button>}
-      {session&&<span className="pill pill-soft">session {session.id.slice(-6)} · {session.detectionCount} detections</span>}
+
+    {err && status === 'on' && <p className="err-text">{err}</p>}
+
+    {/* ---------- current prediction ---------- */}
+    {warm && warm.status !== 'ready' && (
+      <p className="lm-note">
+        {warm.status === 'warming' && 'The backend is warming up its models (first YAMNet inference builds the TensorFlow graph, which can take a minute or two). The first window will be slow; later ones are about a second.'}
+        {warm.status === 'cold' && 'The backend has not warmed up its models yet. The first window may take a minute or two.'}
+        {warm.status === 'error' && `The backend could not warm up its models: ${warm.error ?? 'unknown reason'}. Predictions may be unavailable.`}
+        {warm.status === 'unknown' && 'The backend did not report its model warm-up state.'}
+      </p>
+    )}
+    {warm && warm.status === 'ready' && warm.seconds != null && warm.seconds > 20 && (
+      <p className="lm-muted lm-warm-note">Models warmed in {Math.round(warm.seconds)}s at start-up.</p>
+    )}
+
+    <div className={'lm-pred-card' + (analysing ? ' busy' : '')}>
+      <div className="lm-pred-head">
+        <span className="lm-eyebrow">CURRENT PREDICTION</span>
+        {status === 'on' && <span className={'pill ' + (analysing ? 'seg-medium' : 'seg-ok')}>{analysing ? 'Listening…' : '● live'}</span>}
+      </div>
+      {current
+        ? <>
+          <div className="lm-pred-value">{isNoEvent ? 'No event detected' : mergedClass}</div>
+          <div className="lm-bar big"><i style={{transform:`scaleX(${Math.max(0, Math.min(1, mergedConf))})`}}/></div>
+          <div className="lm-pred-meta">
+            <span className="lm-mono">{Math.round(mergedConf * 100)}%</span>
+            <span className="lm-muted">model: server ensemble (YAMNet · CNN · SVM)</span>
+            <span className={'pill seg-' + (current.severity ?? 'low')}>{current.severity ?? 'low'}</span>
+            <ClockTime at={updatedAt}/>
+          </div>
+          {repeatRun >= 3 && !isNoEvent && (
+            <p className="lm-note">Same class for {repeatRun} windows in a row. The per-model results below show which model is driving it.</p>
+          )}
+        </>
+        : <div className="lm-pred-value dim">{status === 'on' ? 'Listening…' : 'Microphone off'}</div>}
     </div>
+
+    {/* ---------- per-model results ---------- */}
+    {breakdown && <>
+      <div className="section-head lm-section">
+        <div><h3>Server model breakdown</h3><p className="muted">Each model scored this same window on its own. A model that could not run says so.</p></div>
+      </div>
+      <div className="lm-models">
+        {SERVER_MODELS.map(key => {
+          const m = breakdown[key];
+          return m ? <ModelTile key={key} m={m}/> : null;
+        })}
+      </div>
+    </>}
+
+    <TmPanel status={tmStatus} err={tmErr} result={tm} updatedAt={tmAt}/>
+
+    {/* ---------- history ---------- */}
     <div className="live-results">
-      <div className="section-head"><div><h3>Live detections</h3><p className="muted">Real results from your microphone</p></div></div>
-      {results.length===0?<div className="empty-state"><Mic size={26}/><p className="muted">No detections yet — start listening and speak or play sound.</p></div>:
-      <div className="detect-list">{results.map(r=><div className="detect-row" key={r.id}>
-        <div className="sound"><FileAudio size={17}/></div>
-        <div className="detect-main"><b>{r.classification}{!r.classification||r.classification==='No event detected'?(<em className="muted"> (quiet chunk)</em>):null}</b><p className="muted"><NiceTime iso={r.createdAt}/> · {r.audioQuality?.rms!=null?`rms ${(r.audioQuality.rms*100).toFixed(1)}%`:'quality unknown'}</p></div>
-        <span className={'pill seg-'+r.severity}>{r.severity}</span><b className="conf">{Math.round((r.confidence??0)*100)}%</b>
-      </div>)}</div>}
+      <div className="section-head"><div><h3>Live detections</h3><p className="muted">Newest first — {history.length} of the last 25 windows</p></div></div>
+      {history.length === 0
+        ? <div className="empty-state"><Mic size={26}/><p className="muted">No windows analysed yet — start the microphone and speak or play a sound.</p></div>
+        : <div className="detect-list">{history.map(r => <div className="detect-row" key={r.id}>
+            <div className="sound"><FileAudio size={17}/></div>
+            <div className="detect-main">
+              <b>{r.classification}{r.classification === 'No event detected' ? <em className="muted"> (below the model&apos;s decision floor)</em> : null}</b>
+              <p className="muted"><NiceTime iso={r.createdAt}/> · {r.audioQuality?.rms != null ? `rms ${(r.audioQuality.rms * 100).toFixed(1)}%` : 'level unknown'}</p>
+            </div>
+            <span className={'pill seg-' + r.severity}>{r.severity}</span>
+            <b className="conf">{Math.round((r.confidence ?? 0) * 100)}%</b>
+          </div>)}</div>}
     </div>
   </div>;
 }
@@ -322,8 +606,14 @@ export function LiveMonitorPage(){
       {([['audio','Audio monitor',Mic],['camera','Camera monitor',Camera],['events','Event stream',Zap]] as [Tab,string,React.ElementType][]).map(([id,label,Icon])=>
         <button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}><Icon size={16}/>{label}</button>)}
     </div>
-    <AnimatePresence mode="wait"><motion.div key={tab} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}} transition={{duration:.15}}>
+    {/*
+      Keyed directly rather than inside AnimatePresence mode="wait". Waiting
+      for an exit animation to finish would delay the AudioMonitor unmount,
+      and an exit never finishes while requestAnimationFrame is paused (a
+      hidden tab). That would leave the microphone open after switching tabs.
+    */}
+    <motion.div key={tab} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{duration:.15}}>
       {tab==='audio'&&<AudioMonitor/>}{tab==='camera'&&<CameraMonitor/>}{tab==='events'&&<><EventStream/><SessionLog/></>}
-    </motion.div></AnimatePresence>
+    </motion.div>
   </div>;
 }

@@ -124,23 +124,31 @@ def _load_yamnet_extractor():
             import tensorflow_hub as hub
             _YAMNET_MODEL = hub.load(YAMNET_HANDLE)
         except Exception as exc:
-            raise RuntimeError(f"YAMNet extractor is unavailable: {exc}") from exc
+            print(f"WARNING: YAMNet extractor unavailable: {exc}")
+            return None
     return _YAMNET_MODEL
 
 
-def extract_yamnet_embedding(y: np.ndarray, sr: int) -> np.ndarray:
-    """Return the mean 1024-D embedding using YAMNet's 16 kHz mono input contract."""
-    if sr != 16000:
-        y = librosa.resample(y, orig_sr=sr, target_sr=16000)
-    audio = np.asarray(y, dtype=np.float32)
-    if audio.size == 0:
-        raise ValueError("Cannot extract a YAMNet embedding from empty audio")
-    extractor = _load_yamnet_extractor()
-    _scores, embeddings, _spectrogram = extractor(audio)
-    embedding = np.mean(embeddings.numpy(), axis=0, keepdims=True)
-    if embedding.shape != (1, 1024):
-        raise RuntimeError(f"Unexpected YAMNet embedding shape: {embedding.shape}")
-    return embedding.astype(np.float32)
+def extract_yamnet_embedding(y: np.ndarray, sr: int) -> np.ndarray | None:
+    """Return the mean 1024-D embedding using YAMNet's 16 kHz mono input contract.
+    Returns None if YAMNet is unavailable (TF Hub not installed)."""
+    try:
+        if sr != 16000:
+            y = librosa.resample(y, orig_sr=sr, target_sr=16000)
+        audio = np.asarray(y, dtype=np.float32)
+        if audio.size == 0:
+            return None
+        extractor = _load_yamnet_extractor()
+        if extractor is None:
+            return None
+        _scores, embeddings, _spectrogram = extractor(audio)
+        embedding = np.mean(embeddings.numpy(), axis=0, keepdims=True)
+        if embedding.shape != (1, 1024):
+            return None
+        return embedding.astype(np.float32)
+    except Exception as exc:
+        print(f"WARNING: YAMNet embedding extraction failed: {exc}")
+        return None
 
 
 def extract_tabular_features(y: np.ndarray, sr: int) -> np.ndarray:
@@ -235,34 +243,78 @@ def evaluate_audio(audio_path: Path) -> Dict[str, Any]:
     """Run 3 ML models on input audio and return comparative + ensemble output."""
     load_models()
 
-    # Load audio
+    # Load audio. A decode failure must not be turned into a silent array:
+    # doing so is what made every undecodable upload look like a calm, highly
+    # confident "Background Noise". The caller is told to reject the file.
     try:
         y, sr = librosa.load(str(audio_path), sr=22050, duration=5.0)
+        if y.size == 0:
+            raise ValueError("decoded to zero samples")
     except Exception as e:
-        print(f"WARNING: librosa load error: {e}")
-        y, sr = np.zeros(22050 * 3, dtype=np.float32), 22050
+        return {
+            "classification": None,
+            "confidence": 0.0,
+            "severity": "low",
+            "undecodable": True,
+            "undecodableReason": f"{type(e).__name__}: {e}",
+            "python_prediction": {"classification": None, "confidence": 0.0,
+                                  "modelVersion": "3-model-ensemble-1.0"},
+            "models": {},
+            "modelAgreement": "not_evaluated",
+            "audioQuality": {"status": "unreadable", "rms": None, "duration": None},
+        }
 
     # Audio quality check
     rms = float(np.sqrt(np.mean(y**2)))
     is_silent = rms < 0.003
 
     if is_silent:
+        # No model was run, so no model opinion is reported. Inventing a class
+        # and a confidence here is what previously made silence look like a
+        # confident "Background Noise" detection.
         return {
             "classification": "Background Noise",
-            "confidence": 0.95,
+            "confidence": 0.0,
             "severity": "low",
+            "silent": True,
+            "silentReason": f"input level {rms:.5f} is below the 0.003 silence floor; no model was run",
             "python_prediction": {
                 "classification": "Background Noise",
-                "confidence": 0.95,
+                "confidence": 0.0,
                 "modelVersion": "3-model-ensemble-1.0",
             },
             "models": {
-                "yamnet": {"classification": "Background Noise", "confidence": 0.0, "status": "not_evaluated"},
-                "svm": {"classification": "Background Noise", "confidence": 0.93, "accuracy": 0.916},
-                "cnn": {"classification": "Background Noise", "confidence": 0.91, "accuracy": 0.910},
+                "yamnet": {
+                    "name": "YAMNet Embedding Classifier",
+                    "classification": None,
+                    "confidence": 0.0,
+                    "status": "not_evaluated",
+                    "reason": "silent input",
+                },
+                "svm": {
+                    "name": "Support Vector Machine (SVM)",
+                    "classification": None,
+                    "confidence": 0.0,
+                    "accuracy": 0.9163,
+                    "status": "not_evaluated",
+                    "reason": "silent input",
+                },
+                "cnn": {
+                    "name": "2D Convolutional Neural Network (CNN)",
+                    "classification": None,
+                    "confidence": 0.0,
+                    "accuracy": 0.9099,
+                    "status": "not_evaluated",
+                    "reason": "silent input",
+                },
             },
-            "modelAgreement": "agree",
-            "audioQuality": {"status": "good" if rms > 0.001 else "poor", "rms": round(rms, 5), "duration": round(len(y)/sr, 2)},
+            "modelAgreement": "not_evaluated",
+            "audioQuality": {
+                "status": "good" if rms > 0.001 else "poor",
+                "rms": round(rms, 5),
+                "duration": round(len(y)/sr, 2),
+                "sampleRate": sr,
+            },
         }
 
     # 1. Feature Extraction
@@ -271,62 +323,96 @@ def evaluate_audio(audio_path: Path) -> Dict[str, Any]:
 
     # 2. Model 1: YAMNet / Primary Classifier
     yamnet_probs = None
+    yamnet_error = "model bundle not loaded"
     if _YAMNET_BUNDLE is not None:
         try:
             yamnet_embedding = extract_yamnet_embedding(y, sr)
-            yamnet_features = _YAMNET_BUNDLE["scaler"].transform(yamnet_embedding)
-            yamnet_probs = _YAMNET_BUNDLE["classifier"].predict_proba(yamnet_features)[0]
+            if yamnet_embedding is not None:
+                yamnet_features = _YAMNET_BUNDLE["scaler"].transform(yamnet_embedding)
+                yamnet_probs = _YAMNET_BUNDLE["classifier"].predict_proba(yamnet_features)[0]
+            else:
+                yamnet_error = "embedding extraction returned nothing"
         except Exception as e:
             print(f"YAMNet predict error: {e}")
+            yamnet_error = f"{type(e).__name__}: {e}"
 
-    if yamnet_probs is None:
-        yamnet_probs = np.full(10, 0.1, dtype=np.float32)
+    # No uniform placeholder: a model that did not run is excluded, not faked.
+    yamnet_ran = yamnet_probs is not None
+    if not yamnet_ran:
+        yamnet_probs = np.zeros(10, dtype=np.float32)
 
     yamnet_idx = int(np.argmax(yamnet_probs))
-    yamnet_label = CLASS_LABELS.get(str(yamnet_idx), "Other")
-    yamnet_conf = float(yamnet_probs[yamnet_idx])
+    yamnet_label = CLASS_LABELS.get(str(yamnet_idx), "Other") if yamnet_ran else None
+    yamnet_conf = float(yamnet_probs[yamnet_idx]) if yamnet_ran else 0.0
 
     # 3. Model 2: Support Vector Machine (SVM)
     svm_probs = None
+    svm_error = "model not loaded"
     if _SVM_MODEL is not None:
         try:
             svm_probs = _SVM_MODEL.predict_proba(tabular_feats)[0]
         except Exception as e:
             print(f"SVM predict error: {e}")
+            svm_error = f"{type(e).__name__}: {e}"
+    else:
+        svm_error = "model not loaded"
 
-    if svm_probs is None:
-        svm_probs = np.full(10, 0.1, dtype=np.float32)
+    svm_ran = svm_probs is not None
+    if not svm_ran:
+        svm_probs = np.zeros(10, dtype=np.float32)
 
     svm_idx = int(np.argmax(svm_probs))
-    svm_label = CLASS_LABELS.get(str(svm_idx), "Other")
-    svm_conf = float(svm_probs[svm_idx])
+    svm_label = CLASS_LABELS.get(str(svm_idx), "Other") if svm_ran else None
+    svm_conf = float(svm_probs[svm_idx]) if svm_ran else 0.0
 
     # 4. Model 3: 2D Convolutional Neural Network (CNN)
     cnn_probs = None
+    cnn_error = "weights not loaded"
     if _CNN_WEIGHTS is not None:
         try:
             cnn_probs = cnn_forward_pass(spectrogram_feats, _CNN_WEIGHTS)
         except Exception as e:
             print(f"CNN forward pass error: {e}")
+            cnn_error = f"{type(e).__name__}: {e}"
+    else:
+        cnn_error = "weights not loaded"
 
-    if cnn_probs is None:
-        cnn_probs = np.full(10, 0.1, dtype=np.float32)
+    cnn_ran = cnn_probs is not None
+    if not cnn_ran:
+        cnn_probs = np.zeros(10, dtype=np.float32)
 
     cnn_idx = int(np.argmax(cnn_probs))
-    cnn_label = CLASS_LABELS.get(str(cnn_idx), "Other")
-    cnn_conf = float(cnn_probs[cnn_idx])
+    cnn_label = CLASS_LABELS.get(str(cnn_idx), "Other") if cnn_ran else None
+    cnn_conf = float(cnn_probs[cnn_idx]) if cnn_ran else 0.0
 
-    # 5. Ensemble Weighted Decision (RF: 0.40, SVM: 0.35, CNN: 0.25)
-    ensemble_probs = (0.40 * yamnet_probs) + (0.35 * svm_probs) + (0.25 * cnn_probs)
+    # 5. Ensemble Weighted Decision (YAMNet: 0.40, SVM: 0.35, CNN: 0.25)
+    # Weights are renormalised over the models that actually ran, so the merged
+    # confidence stays on the same scale when a member is missing.
+    ensemble_probs = np.zeros(10, dtype=np.float32)
+    total_weight = 0.0
+    for probs, ran, weight in (
+        (yamnet_probs, yamnet_ran, 0.40),
+        (svm_probs, svm_ran, 0.35),
+        (cnn_probs, cnn_ran, 0.25),
+    ):
+        if ran:
+            ensemble_probs += weight * probs
+            total_weight += weight
+    if total_weight > 0:
+        ensemble_probs = ensemble_probs / total_weight
+
     final_idx = int(np.argmax(ensemble_probs))
-    final_label = CLASS_LABELS.get(str(final_idx), "Other")
-    final_conf = float(ensemble_probs[final_idx])
+    final_label = CLASS_LABELS.get(str(final_idx), "Other") if total_weight > 0 else None
+    final_conf = float(ensemble_probs[final_idx]) if total_weight > 0 else 0.0
 
     # Determine Model Agreement
-    labels_agree = (yamnet_label == svm_label == cnn_label)
-    majority_agree = (yamnet_label == svm_label) or (yamnet_label == cnn_label) or (svm_label == cnn_label)
+    ran_labels = [lbl for lbl in (yamnet_label, svm_label, cnn_label) if lbl is not None]
+    labels_agree = len(ran_labels) == 3 and len(set(ran_labels)) == 1
+    majority_agree = len(set(ran_labels)) <= 2
 
-    if labels_agree:
+    if len(ran_labels) < 2:
+        agreement = "not_evaluated"
+    elif labels_agree:
         agreement = "agree"
     elif majority_agree:
         agreement = "weak_agree"
@@ -350,7 +436,8 @@ def evaluate_audio(audio_path: Path) -> Dict[str, Any]:
     return {
         "classification": final_label,
         "confidence": round(final_conf, 4),
-        "severity": severity,
+        "severity": severity if final_label else "low",
+        "silent": False,
         "python_prediction": {
             "classification": final_label,
             "confidence": round(final_conf, 4),
@@ -362,18 +449,24 @@ def evaluate_audio(audio_path: Path) -> Dict[str, Any]:
                 "classification": yamnet_label,
                 "confidence": round(yamnet_conf, 4),
                 "embeddingDimensions": 1024,
+                "status": "evaluated" if yamnet_ran else "not_evaluated",
+                **({} if yamnet_ran else {"reason": yamnet_error}),
             },
             "svm": {
                 "name": "Support Vector Machine (SVM)",
                 "classification": svm_label,
                 "confidence": round(svm_conf, 4),
                 "accuracy": 0.9163,
+                "status": "evaluated" if svm_ran else "not_evaluated",
+                **({} if svm_ran else {"reason": svm_error}),
             },
             "cnn": {
                 "name": "2D Convolutional Neural Network (CNN)",
                 "classification": cnn_label,
                 "confidence": round(cnn_conf, 4),
                 "accuracy": 0.9099,
+                "status": "evaluated" if cnn_ran else "not_evaluated",
+                **({} if cnn_ran else {"reason": cnn_error}),
             },
         },
         "modelAgreement": agreement,

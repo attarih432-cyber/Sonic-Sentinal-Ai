@@ -10,7 +10,6 @@ import h5py
 
 MODEL_DIR = Path("D:/SonicSentinel AI/ml-service/models/python_model")
 CLASS_LABELS_PATH = MODEL_DIR / "class_labels.json"
-RF_PATH = MODEL_DIR / "random_forest_model.pkl"
 SVM_PATH = MODEL_DIR / "svm_model.pkl"
 CNN_PATH = MODEL_DIR / "cnn_model.keras"
 
@@ -29,7 +28,6 @@ if gtm_metadata_path.is_file():
         print(f"  Index {idx} -> {label}")
 
 # Load models
-rf_model = joblib.load(RF_PATH)
 svm_model = joblib.load(SVM_PATH)
 
 # Load CNN weights
@@ -70,18 +68,8 @@ for f in files[:10]:
     y, sr = librosa.load(str(f), sr=22050, duration=5.0)
     feats = extract_tabular_features(y, sr)
     mel = extract_mel_spectrogram(y, sr)
-    
-    # 1. RF
-    rf_probs = rf_model.predict_proba(feats)[0]
-    sort_idx = np.argsort(rf_probs)[::-1]
-    top1_idx, top2_idx = sort_idx[0], sort_idx[1]
-    top1_cls, top2_cls = CLASS_LABELS.get(str(top1_idx)), CLASS_LABELS.get(str(top2_idx))
-    top1_c, top2_c = float(rf_probs[top1_idx]), float(rf_probs[top2_idx])
-    margin = top1_c - top2_c
-    csv_rows.append(["Random Forest", f.name, "Unknown", top1_cls, top1_idx, round(top1_c, 4), top2_cls, round(top2_c, 4), round(margin, 4), [round(x, 4) for x in rf_probs.tolist()]])
-    print(f"\n[RF]  {f.name[:25]}: Top1={top1_cls} ({top1_c:.4f}), Top2={top2_cls} ({top2_c:.4f}), Margin={margin:.4f}")
-    
-    # 2. SVM
+
+    # 1. SVM
     svm_probs = svm_model.predict_proba(feats)[0]
     sort_idx = np.argsort(svm_probs)[::-1]
     top1_idx, top2_idx = sort_idx[0], sort_idx[1]
@@ -91,7 +79,7 @@ for f in files[:10]:
     csv_rows.append(["SVM", f.name, "Unknown", top1_cls, top1_idx, round(top1_c, 4), top2_cls, round(top2_c, 4), round(margin, 4), [round(x, 4) for x in svm_probs.tolist()]])
     print(f"[SVM] {f.name[:25]}: Top1={top1_cls} ({top1_c:.4f}), Top2={top2_cls} ({top2_c:.4f}), Margin={margin:.4f}")
 
-    # 3. CNN
+    # 2. CNN
     cnn_probs = cnn_forward_pass(mel, cnn_weights)
     sort_idx = np.argsort(cnn_probs)[::-1]
     top1_idx, top2_idx = sort_idx[0], sort_idx[1]

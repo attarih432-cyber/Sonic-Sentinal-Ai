@@ -1,0 +1,402 @@
+/* ===========================================================================
+ * Live monitor stylesheet.
+ *
+ * styles.css is the only stylesheet main.tsx imports, but the layout classes
+ * the Live monitor relies on (panel grid, section headers, detection rows,
+ * camera stage) were never carried over from styles.legacy-20260925.css.
+ * The rules below are copied verbatim from that file so the Live page keeps
+ * the original SonicSentinel look instead of a newly invented one.
+ *
+ * The lm-* rules at the end are new, and cover only the live microphone card.
+ * =========================================================================== */
+
+.workspace span,.eyebrow {
+  font-size:10px;font-weight:700;letter-spacing:1.2px;color:#777a94
+}
+
+.hero {
+  display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:29px
+}
+
+.hero h1,.empty h1 {
+  font:800 28px Manrope;margin:6px 0 7px;letter-spacing:-1px
+}
+
+.hero h1 i {
+  font-style:normal;color:#ae90ff
+}
+
+.muted {
+  color:#8a8da2;margin:0;line-height:1.55
+}
+
+.section-head {
+  display:flex;justify-content:space-between;align-items:flex-start
+}
+
+.section-head h3 {
+  font:700 14px Manrope;margin:0 0 4px
+}
+
+.section-head p {
+  font-size:11px
+}
+
+.sound {
+  color:#9d83ff;width:31px;height:31px;background:#25213c;display:grid;place-items:center;border-radius:8px
+}
+
+.upload-footer .muted {
+  display:flex;gap:7px;font-size:11px
+}
+
+.sound.large {
+  width:57px;height:57px
+}
+
+.result .muted {
+  max-width:620px;font-size:12px
+}
+
+.hero {
+  align-items:flex-start;gap:14px
+}
+
+.hero .primary {
+  padding:9px
+}
+
+.hero .primary {
+  font-size:0
+}
+
+.hero .primary svg {
+  margin:0
+}
+
+.upload-footer .muted {
+  display:none
+}
+
+.hero h1 {
+  font-size:25px
+}
+
+.functional-page .muted {
+  max-width:620px
+}
+
+.auth-input {
+  height:42px;border-radius:8px;border:1px solid #2b2d3e;background:#11131e;color:#e8e8f2;font:13px inherit;padding:0 13px;outline:none;width:100%
+}
+
+.auth-input:focus {
+  border-color:#8466e5
+}
+
+.landing-feats .section-head {
+  margin-bottom:26px
+}
+
+.grad-text {
+  background:linear-gradient(92deg,#b09aff,#6be3c8 60%,#8b5cf6);-webkit-background-clip:text;background-clip:text;color:transparent
+}
+
+.dash .hero {
+  display:flex;justify-content:space-between;align-items:center;gap:16px
+}
+
+.pill-soft {
+  background:#1a1c2a;color:#9699ae
+}
+
+.center-pad {
+  display:grid;place-items:center;min-height:180px;color:#8d90a6
+}
+
+.empty-state {
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:48px;color:#5a5d75
+}
+
+.detect-list {
+  display:flex;flex-direction:column
+}
+
+.detect-row {
+  display:flex;align-items:center;gap:14px;padding:13px 4px;border-bottom:1px solid #1d1f2e;flex-wrap:wrap
+}
+
+.detect-row:last-child {
+  border-bottom:0
+}
+
+.detect-main {
+  flex:1;min-width:180px
+}
+
+.detect-main b {
+  display:block;font-size:13px
+}
+
+.conf {
+  color:#a78bfa;font-size:13px;font-weight:700
+}
+
+.row-actions {
+  margin-left:auto;display:flex;gap:8px
+}
+
+.tiny {
+  padding:6px 12px;font-size:11.5px;border-radius:8px;border:0;cursor:pointer;font-weight:600
+}
+
+.err-text {
+  color:#ff7d91;font-size:12px;font-weight:600
+}
+
+.sound.big {
+  width:46px;height:46px;background:#7c5cf626;color:#b09aff;border-radius:14px;display:grid;place-items:center
+}
+
+.live-panel {
+  padding:20px
+}
+
+.live-visual .center-pad {
+  padding:44px 16px;text-align:center;color:#8892b0
+}
+
+.live-results .detect-list {
+  max-height:340px;overflow:auto
+}
+
+.cam-live {
+  position:relative
+}
+
+.cam-wrap.mirrored video {
+  transform:scaleX(-1)
+}
+
+.workspace span,.eyebrow {
+  font:9px var(--ss-mono);letter-spacing:1.25px;color:#7f969b
+}
+
+.hero {
+  padding:2px 0 20px;margin-bottom:16px;border-bottom:1px solid #1e2933
+}
+
+.hero h1,.empty h1 {
+  font:800 27px Manrope;letter-spacing:-1.25px
+}
+
+.hero h1 i {
+  color:var(--ss-cyan)
+}
+
+.muted {
+  color:#84979c
+}
+
+.eyebrow {
+  color:var(--ss-cyan)
+}
+
+.section-head h3 {
+  font:700 14px Manrope;letter-spacing:-.35px
+}
+
+.section-head p {
+  font-family:var(--ss-mono);font-size:9px
+}
+
+.pill-soft {
+  background:#1a2430;color:#a6bcc0
+}
+
+.conf {
+  color:var(--ss-cyan);font-family:var(--ss-mono)
+}
+
+.sound {
+  border-radius:3px;background:#00e8f512;color:var(--ss-cyan)
+}
+
+.detect-row,.alert-row {
+  border-bottom-color:#202b35;transition:background .18s,padding .18s
+}
+
+.detect-row:hover,.alert-row:hover {
+  background:#ffffff05;padding-left:7px
+}
+
+.hero {
+  padding-bottom:15px
+}
+
+.hero h1 {
+  font-size:24px
+}
+
+.detect-row {
+  gap:9px
+}
+
+.auth-input.slim {
+  width:auto;padding:7px 10px;font-size:12px
+}
+
+.device-row .muted {
+  font-size:12px
+}
+
+/* ===========================================================================
+ * LIVE MICROPHONE CARD
+ * Only the new live-microphone elements. Colours come from the existing
+ * styles.css tokens, so this reads as the same product.
+ * =========================================================================== */
+
+/* -- buttons the base sheet never defined -- */
+.ghost {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); color: var(--ink-3);
+  border: 1px solid rgba(255, 255, 255, 0.09); font-weight: 600;
+  transition: var(--transition);
+}
+.ghost:hover { background: rgba(255, 255, 255, 0.09); color: var(--ink); }
+.ghost.tiny { font-size: 11.5px; }
+.ghost.danger { color: var(--crimson); border-color: rgba(255, 51, 102, 0.3); }
+
+.pill.live { background: rgba(47, 224, 168, 0.12); color: var(--emerald); border: 1px solid rgba(47, 224, 168, 0.3); }
+
+/* -- the visualiser's state message sits on top of the canvas -- */
+.live-visual .center-pad {
+  position: absolute; inset: 0; align-content: center; gap: 10px;
+  background: rgba(2, 5, 12, 0.78); text-align: center; padding: 0 18px;
+}
+.live-visual .center-pad p { max-width: 380px; }
+
+/* -- start / stop -- */
+.lm-start, .lm-stop {
+  display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+  padding: 13px 26px; border-radius: var(--r); font-weight: 800;
+  font-size: 13.5px; letter-spacing: 0.2px; border: 1px solid transparent;
+  transition: var(--transition);
+}
+.lm-start {
+  color: #04070f; border: 0;
+  background: linear-gradient(135deg, #0070f3, var(--cyan));
+  box-shadow: 0 0 0 1px rgba(0, 240, 255, 0.4), 0 8px 26px var(--cyan-glow);
+}
+.lm-start:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+.lm-start:disabled { opacity: 0.65; cursor: progress; }
+.lm-stop {
+  color: var(--crimson);
+  background: rgba(255, 51, 102, 0.12);
+  border-color: rgba(255, 51, 102, 0.45);
+  box-shadow: 0 8px 26px rgba(255, 51, 102, 0.18);
+}
+.lm-stop:hover { background: rgba(255, 51, 102, 0.2); }
+.lm-hint { font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); }
+
+/* -- current prediction card -- */
+.lm-pred-card {
+  margin: 18px 0 22px; padding: 18px 20px; border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--panel-hi), rgba(9, 14, 26, 0.6));
+  border: 1px solid var(--panel-border); box-shadow: var(--glass-inset);
+  transition: var(--transition);
+}
+.lm-pred-card.busy { border-color: var(--panel-border-hover); }
+.lm-pred-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lm-eyebrow {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.4px;
+  color: var(--cyan); font-weight: 700;
+}
+.lm-pred-value {
+  font-size: clamp(20px, 3.4vw, 30px); font-weight: 800; letter-spacing: -0.6px;
+  color: var(--ink); margin: 10px 0 12px; line-height: 1.15; word-break: break-word;
+}
+.lm-pred-value.dim { color: var(--ink-4); font-size: 19px; }
+.lm-pred-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; font-size: 11px; }
+.lm-mono { font-family: var(--mono); }
+.lm-muted { color: var(--ink-4); font-size: 10.5px; }
+.lm-note {
+  margin: 12px 0 0; padding: 9px 11px; border-radius: var(--r);
+  background: rgba(255, 184, 0, 0.08); border: 1px solid rgba(255, 184, 0, 0.22);
+  color: var(--amber); font-size: 11px; line-height: 1.5;
+}
+
+/* -- confidence bar -- */
+.lm-bar {
+  height: 6px; border-radius: var(--r-full); overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+}
+.lm-bar.big { height: 9px; }
+.lm-bar > i {
+  display: block; height: 100%; width: 100%; transform-origin: left;
+  background: linear-gradient(90deg, var(--blue), var(--cyan));
+  box-shadow: 0 0 10px var(--cyan-glow); transition: transform 0.3s ease;
+}
+
+/* -- per-model tiles -- */
+.lm-section { margin: 0 0 12px; }
+.lm-models {
+  display: grid; gap: 10px; margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.lm-model {
+  padding: 13px 14px; border-radius: var(--r);
+  background: rgba(4, 8, 18, 0.55); border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.lm-model.idle { background: rgba(4, 8, 18, 0.3); }
+.lm-model-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.lm-model-head b { font-size: 11.5px; color: var(--ink-2); line-height: 1.3; }
+.lm-model-class { font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.2; }
+.lm-model-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lm-model-foot .lm-mono { font-size: 15px; font-weight: 700; color: var(--cyan); }
+.lm-model-reason { margin: 0; font-size: 10.5px; color: var(--ink-4); line-height: 1.5; }
+
+/* -- Teachable Machine panel -- */
+.lm-tm {
+  margin: 4px 0 24px; padding: 16px 18px; border-radius: var(--r-lg);
+  background: rgba(123, 97, 255, 0.05); border: 1px solid rgba(123, 97, 255, 0.18);
+}
+.lm-tag {
+  display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: var(--r-full);
+  background: rgba(123, 97, 255, 0.16); color: var(--purple);
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; vertical-align: middle;
+}
+.lm-empty { padding: 26px; }
+.lm-tm .center-pad { min-height: 110px; gap: 10px; }
+.lm-pred-label {
+  margin-top: 14px; font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: 1.2px; color: var(--ink-4); font-weight: 700;
+}
+.lm-tm .lm-pred-value { margin: 6px 0 0; }
+
+.lm-tm-bars { margin-top: 16px; }
+.lm-tm-bars-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.lm-tm-bars-head b { font-size: 11.5px; color: var(--ink-2); }
+.lm-tm-row {
+  display: grid; grid-template-columns: minmax(90px, 1.4fr) 2fr 48px;
+  align-items: center; gap: 10px; padding: 4px 0;
+}
+.lm-tm-row.top .lm-tm-name { color: var(--purple); font-weight: 700; }
+.lm-tm-row.bg .lm-tm-name { color: var(--ink-4); font-style: italic; }
+.lm-tm-name {
+  font-size: 11px; color: var(--ink-3); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.lm-tm-track { height: 6px; border-radius: var(--r-full); background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.lm-tm-track > i {
+  display: block; height: 100%; width: 100%; transform-origin: left;
+  background: linear-gradient(90deg, var(--purple), var(--cyan)); transition: transform 0.3s ease;
+}
+.lm-tm-val { font-size: 10.5px; color: var(--ink-3); text-align: right; }
+
+@media (max-width: 720px) {
+  .lm-start, .lm-stop { width: 100%; justify-content: center; }
+  .lm-tm-row { grid-template-columns: minmax(70px, 1.2fr) 1.6fr 44px; }
+}
+.lm-warm-note { display: block; margin: -6px 0 12px; }

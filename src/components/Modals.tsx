@@ -103,7 +103,7 @@ export function DetectionDetailModal({
                   <span>SVM Pipeline (91.6%)</span>
                 </div>
                 <strong>{(detection as any).models?.svm?.classification || detection.classification || '—'}</strong>
-                <p className="muted">Confidence: {pct((detection as any).models?.svm?.confidence ?? (detection.confidence * 0.95))}</p>
+                <p className="muted">Confidence: {pct((detection as any).models?.svm?.confidence)}</p>
                 <small className="engine-tag">StandardScaler + SVC</small>
               </div>
 
@@ -113,7 +113,7 @@ export function DetectionDetailModal({
                   <span>2D CNN (91.0%)</span>
                 </div>
                 <strong>{(detection as any).models?.cnn?.classification || detection.classification || '—'}</strong>
-                <p className="muted">Confidence: {pct((detection as any).models?.cnn?.confidence ?? (detection.confidence * 0.92))}</p>
+                <p className="muted">Confidence: {pct((detection as any).models?.cnn?.confidence)}</p>
                 <small className="engine-tag">128x216 Mel Spectrogram</small>
               </div>
             </div>
