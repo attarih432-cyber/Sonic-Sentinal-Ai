@@ -22,8 +22,12 @@ const TM_FFT_SIZE = 2048;
 const TM_HOP = 1024;
 const TM_FRAMES = 43;
 const TM_BINS = 232;
-/** Samples needed for the full 43-frame spectrogram (window span ≈ 1.0 s). */
-const TM_SPAN = TM_FRAMES * TM_HOP + TM_FFT_SIZE;
+/**
+ * Samples the graph's input window spans (43 frames x 1024 hop + one 2048 FFT).
+ * Exported so callers that pick their own window out of a longer file can size
+ * it to the same geometry instead of guessing "1 second".
+ */
+export const TM_SPAN = TM_FRAMES * TM_HOP + TM_FFT_SIZE;
 
 export interface TmClassScore {
   index: number;

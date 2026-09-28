@@ -19,7 +19,7 @@ import { useAuth } from './auth/AuthContext';
 import { detectionsApi, type Detection as ApiDetection } from './api/detections';
 import { reportsApi, type ActivityPoint } from './api/reports';
 import { LiveMonitorPage } from './live';
-import { tmModelUrl } from './lib/teachableMachine';
+import { tmModelUrl, recognizeWindow, TM_SAMPLE_RATE, TM_SPAN } from './lib/teachableMachine';
 import { 
   ClassBadge, SeverityBadge, LiveAudioWaveformCard, 
   InteractiveAudioPreview, CLASS_META, getClassMeta 
@@ -631,87 +631,92 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
     return runtime.speechCommands;
   };
 
+  /**
+   * Decode an uploaded file to mono at its own sample rate.
+   *
+   * The channel mix is done here rather than reading channel 0, so a stereo
+   * file whose event sits in one channel still classifies correctly.
+   */
+  const decodeMono = async (audioFile: File): Promise<{ data: Float32Array; rate: number }> => {
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+    const rate = decoded.sampleRate;
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < decoded.numberOfChannels; c++) channels.push(decoded.getChannelData(c));
+    const mono = new Float32Array(decoded.length);
+    for (let i = 0; i < decoded.length; i++) {
+      let sum = 0;
+      for (let c = 0; c < channels.length; c++) sum += channels[c][i];
+      mono[i] = sum / channels.length;
+    }
+    audioCtx.close().catch(() => {});
+    return { data: mono, rate };
+  };
+
+  /**
+   * Loudest full-length window in the file.
+   *
+   * A short event inside a long recording is what the model should see, not
+   * whatever happens to sit at the start. The window is sized to the model's
+   * own geometry (TM_SPAN at TM_SAMPLE_RATE) so it still becomes a valid
+   * 43x232 spectrogram after resampling, with a couple of samples of slack so
+   * rounding can never land one sample short.
+   */
+  const pickLoudestWindow = (mono: Float32Array, rate: number): Float32Array | null => {
+    const winLen = Math.ceil((rate * TM_SPAN) / TM_SAMPLE_RATE) + 2;
+    if (mono.length < winLen) return null;
+
+    const step = Math.max(1, Math.floor(winLen / 4));
+    let best = 0;
+    let bestEnergy = -1;
+    for (let i = 0; i + winLen <= mono.length; i += step) {
+      let energy = 0;
+      for (let j = i; j < i + winLen; j += 64) energy += mono[j] * mono[j];
+      if (energy > bestEnergy) {
+        bestEnergy = energy;
+        best = i;
+      }
+    }
+    return mono.subarray(best, best + winLen);
+  };
+
   const runGTMAnalysis = async (audioFile: File) => {
     try {
       setGtmLoading(true);
       setGtmError('');
       setGtmResult(null);
 
-      // Must be absolute: the Speech Commands runtime fetches these itself and
-      // rejects a relative path with "Unsupported URL scheme". It used to be
-      // built as `host + '/tm-model/...'`, which is relative on production.
-      const checkpointURL = tmModelUrl('model.json');
-      const metadataURL = tmModelUrl('metadata.json');
-
       const speechCommands = await ensureGtmRuntime();
 
+      // Absolute URLs: the Speech Commands runtime fetches these itself and
+      // rejects a relative path with "Unsupported URL scheme".
       const recognizer = speechCommands.create(
         'BROWSER_FFT',
         undefined,
-        checkpointURL,
-        metadataURL
+        tmModelUrl('model.json'),
+        tmModelUrl('metadata.json')
       );
-
       await recognizer.ensureModelLoaded();
-      const labels = recognizer.wordLabels();
 
-      try {
-        const arrayBuffer = await audioFile.arrayBuffer();
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 44100 });
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        const rawChannel = audioBuffer.getChannelData(0);
-        
-        // Target 1-second frame @ 44.1kHz (44,100 samples)
-        const targetLen = 44100;
-        let maxEnergyIdx = 0;
-        let maxEnergy = 0;
-        const step = 4410;
-        for (let i = 0; i <= rawChannel.length - targetLen; i += step) {
-          let energy = 0;
-          for (let j = i; j < i + targetLen; j += 100) {
-            energy += Math.abs(rawChannel[j]);
-          }
-          if (energy > maxEnergy) {
-            maxEnergy = energy;
-            maxEnergyIdx = i;
-          }
-        }
-        
-        const sliceData = new Float32Array(targetLen);
-        if (rawChannel.length >= targetLen) {
-          sliceData.set(rawChannel.subarray(maxEnergyIdx, maxEnergyIdx + targetLen));
-        } else {
-          sliceData.set(rawChannel);
-        }
-        audioCtx.close().catch(() => {});
+      const { data, rate } = await decodeMono(audioFile);
+      const clip = pickLoudestWindow(data, rate);
+      if (!clip) {
+        setGtmError(
+          `Teachable Machine needs at least ${(TM_SPAN / TM_SAMPLE_RATE).toFixed(2)}s of audio; this file is ${(data.length / rate).toFixed(2)}s.`
+        );
+        return;
+      }
 
-        const rawPredictions = await recognizer.recognize(sliceData);
-        if (rawPredictions && rawPredictions.scores) {
-          const scores = Array.from(rawPredictions.scores as Float32Array);
-          const aliases: Record<string, string> = {
-            'alaram or siren': 'Alarm or Siren',
-            'alarm or siren': 'Alarm or Siren',
-            'vehical horn': 'Vehicle Horn',
-            'vehicle horn': 'Vehicle Horn',
-            'animal sound': 'Animal Sound',
-          };
-          const pairs = labels.map((lbl: string, idx: number) => {
-            const rawLabel = lbl.trim();
-            return {
-              label: aliases[rawLabel.toLowerCase()] || rawLabel,
-              confidence: Number(scores[idx] ?? 0)
-            };
-          }).sort((a: any, b: any) => b.confidence - a.confidence);
-          setGtmResult(pairs);
-          return;
-        }
-      } catch {}
-
-      // Never synthesize a Teachable Machine score from the Python result.
-      setGtmResult(null);
-      setGtmError('Teachable Machine could not produce a prediction for this audio.');
+      // One recognizer for the whole app: this builds the spectrogram the graph
+      // was trained on. Feeding raw PCM here produced no usable scores.
+      const result = await recognizeWindow(recognizer, clip, rate);
+      setGtmResult(result.scores.map((s) => ({ label: s.label, confidence: s.score })));
     } catch (e: any) {
-      setGtmError('GTM model error: ' + (e.message || e));
+      // Report the real cause. A thrown error and a genuinely low score are
+      // different facts and must not both read as "no prediction".
+      setGtmResult(null);
+      setGtmError('Teachable Machine error: ' + (e?.message || String(e)));
     } finally {
       setGtmLoading(false);
     }
