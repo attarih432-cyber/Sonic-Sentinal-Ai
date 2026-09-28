@@ -49,7 +49,13 @@ Thumbs.db
 ml-service/data/uploads/
 ml-service/data/temp/
 ml-service/scratch_temp/
+# Production model weights MUST be committed. Railway builds from the git repo,
+# so anything ignored here is simply absent from the deployed image and that
+# model then fails to load at runtime (YAMNet and SVM both disappeared this way).
+# Scratch pickles outside the production model dir stay ignored.
 ml-service/models/python_model/*.pkl
+!ml-service/models/python_model/svm_model.pkl
+!ml-service/models/python_model/sonicsentinel_yamnet_model.pkl
 *.db
 *.db-*
 *.sqlite*
