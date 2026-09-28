@@ -19,6 +19,7 @@ import { useAuth } from './auth/AuthContext';
 import { detectionsApi, type Detection as ApiDetection } from './api/detections';
 import { reportsApi, type ActivityPoint } from './api/reports';
 import { LiveMonitorPage } from './live';
+import { tmModelUrl } from './lib/teachableMachine';
 import { 
   ClassBadge, SeverityBadge, LiveAudioWaveformCard, 
   InteractiveAudioPreview, CLASS_META, getClassMeta 
@@ -636,9 +637,11 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       setGtmError('');
       setGtmResult(null);
 
-      const host = window.location.port === '5173' ? 'http://localhost:8000' : '';
-      const checkpointURL = host + '/tm-model/model.json';
-      const metadataURL = host + '/tm-model/metadata.json';
+      // Must be absolute: the Speech Commands runtime fetches these itself and
+      // rejects a relative path with "Unsupported URL scheme". It used to be
+      // built as `host + '/tm-model/...'`, which is relative on production.
+      const checkpointURL = tmModelUrl('model.json');
+      const metadataURL = tmModelUrl('metadata.json');
 
       const speechCommands = await ensureGtmRuntime();
 
@@ -770,7 +773,10 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       if (detail) {
         setError(typeof detail === 'string' ? detail : JSON.stringify(detail));
       } else if (err.message === 'Network Error' || !err.response) {
-        setError('Server Connection Error: Could not reach backend API at http://localhost:8000. Please ensure backend server is running.');
+        // No host here: the API is same-origin in production and proxied in
+        // dev, so naming a port would only send the user chasing a server that
+        // does not exist where they are looking.
+        setError('Server connection failed. The request never reached the server — check your network and try again.');
       } else {
         setError(err.message || 'Audio analysis failed. Please check file format.');
       }

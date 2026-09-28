@@ -70,6 +70,19 @@ function modelBase(): string {
   return new URL('/tm-model', window.location.origin).href.replace(/\/$/, '');
 }
 
+/**
+ * Absolute URL for one file of the exported model.
+ *
+ * Every caller must use this instead of building a path by hand. The Speech
+ * Commands runtime fetches the metadata and checkpoint itself and rejects any
+ * URL that is not http(s), so a root-relative "/tm-model/metadata.json" fails
+ * with "Unsupported URL scheme" — which is what a hand-rolled
+ * `host + '/tm-model/...'` string produced outside the dev server's port.
+ */
+export function tmModelUrl(file: string): string {
+  return `${modelBase()}/${file.replace(/^\//, '')}`;
+}
+
 function loadScript(id: string, src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.getElementById(id) as HTMLScriptElement | null;
