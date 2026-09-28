@@ -758,7 +758,14 @@ export function Analyze({ onGoLive }: { onGoLive?: () => void }) {
       // Run GTM analysis in parallel (non-blocking)
       runGTMAnalysis(file);
     } catch (err: any) {
-      setError(err.response?.data?.detail ?? 'Audio analysis failed. Check file format.');
+      const detail = err.response?.data?.detail;
+      if (detail) {
+        setError(typeof detail === 'string' ? detail : JSON.stringify(detail));
+      } else if (err.message === 'Network Error' || !err.response) {
+        setError('Server Connection Error: Could not reach backend API at http://localhost:8000. Please ensure backend server is running.');
+      } else {
+        setError(err.message || 'Audio analysis failed. Please check file format.');
+      }
       setStage('idle');
     }
   };
