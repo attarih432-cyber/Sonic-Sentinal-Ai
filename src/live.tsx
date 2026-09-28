@@ -140,6 +140,7 @@ function AudioMonitor(){
   const seqRef = useRef(0);
   const lastClassRef = useRef<string | null>(null);
   const repeatRef = useRef(0);
+  const startingRef = useRef(false); // one in-flight start: a double-tap must not double getUserMedia
 
   const toast = (type: string, message: string) =>
     window.dispatchEvent(new CustomEvent('sonic:toast', {detail: {type, message}}));
@@ -324,7 +325,12 @@ function AudioMonitor(){
 
   /* ---- start / stop ---- */
   const start = async () => {
-    if (engineRef.current?.isRunning()) return;     // refuse a second stream
+    // Refuse a second stream AND a second concurrent start. A rapid double-tap
+    // issues two getUserMedia calls and the browser fails the second one with
+    // NotReadableError — "microphone is in use by another application".
+    if (engineRef.current?.isRunning() || startingRef.current) return;
+    startingRef.current = true;
+    try {
     setErr('');
     setTmErr('');
     setStatus('starting');
@@ -379,6 +385,9 @@ function AudioMonitor(){
       sessionIdRef.current = null;          // monitoring still works without it
     }
     toast('info', `Microphone live — a ${WINDOW_SECONDS}s window every ${(WINDOW_INTERVAL_MS / 1000).toFixed(1)}s`);
+    } finally {
+      startingRef.current = false;
+    }
   };
 
   const stop = async () => {

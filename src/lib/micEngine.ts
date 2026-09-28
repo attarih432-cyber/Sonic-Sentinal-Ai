@@ -112,7 +112,10 @@ export class MicrophoneEngine {
   }
 
   async start(): Promise<void> {
-    if (this.active) return;
+    // Refuse both an active stream and a concurrent start: two getUserMedia
+    // calls racing one another make the browser fail the second with
+    // NotReadableError — "microphone is in use by another application".
+    if (this.active || this.state === 'starting') return;
 
     if (!navigator.mediaDevices?.getUserMedia) {
       this.state = 'error';
