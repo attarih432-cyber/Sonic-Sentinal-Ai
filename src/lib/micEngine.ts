@@ -65,7 +65,7 @@ function describeMicError(err: unknown): string {
       return 'No microphone was found on this device.';
     case 'NotReadableError':
     case 'TrackStartError':
-      return 'The microphone is in use by another application. Close it and try again.';
+      return 'The microphone is in use by another application (another browser tab, Zoom, Teams, or a similar app). Close it there, then press Start again.';
     case 'AbortError':
       return 'The microphone could not be started.';
     default:
